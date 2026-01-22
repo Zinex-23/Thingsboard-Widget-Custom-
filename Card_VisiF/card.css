@@ -1,0 +1,14 @@
+.legend {
+    font-size: 13px;
+    line-height: 10px;
+}
+
+.legend table { 
+    border-spacing: 0px;
+    border-collapse: separate;
+}
+
+.mouse-events .flot-overlay {
+    cursor: crosshair; 
+}
+

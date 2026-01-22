@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UTC Hidden JP Preview</title>
+  <link rel="stylesheet" href="utc-hidden.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+    }
+    .preview-frame {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .widget-shell {
+      width: 420px;
+      height: 140px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-frame">
+    <div class="widget-shell" id="utc-hidden-root">
+      <div class="utc-hidden-root">
+        <div class="utc-hidden-label" id="utc-hidden-label"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.self = window;
+    self.ctx = {
+      $container: [document.getElementById('utc-hidden-root')],
+      settings: { showUtcLabel: true },
+      dashboard: {
+        dashboardTimewindow: null,
+        setDashboardTimewindow: function (tw) { this.dashboardTimewindow = tw; },
+        getDashboardTimewindow: function () { return this.dashboardTimewindow; },
+        dashboardTimewindowChangedSubject: { next: function () {} }
+      },
+      dashboardCtrl: { onUpdateTimewindow: function () {} }
+    };
+    localStorage.setItem('timewindow_widget_utc_offset_min', String(7 * 60));
+  </script>
+  <script src="utc-hidden.js"></script>
+  <script>
+    if (self.onInit) self.onInit();
+  </script>
+</body>
+</html>
