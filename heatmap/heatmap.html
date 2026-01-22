@@ -1,0 +1,75 @@
+<!-- energy-heatmap.html -->
+<div id="eh2-root" data-theme="light">
+  <div class="eh-card">
+    <!-- Header -->
+    <div id="eh2-header" class="eh-header">
+      <div class="eh-btn-group" id="eh2-range-group">
+        <button class="eh-btn eh-btn--chip" data-range="1d">Last 24 Hours</button>
+        <button class="eh-btn eh-btn--chip active" data-range="1w">Last 7 Days</button>
+        <button class="eh-btn eh-btn--chip" data-range="1m">Last 30 Days</button>
+        <button class="eh-btn eh-btn--chip" data-range="custom">Custom</button>
+      </div>
+
+      <div class="eh-btn-group" id="eh2-hour-mode-group">
+        <button class="eh-btn eh-btn--chip active" data-hour-mode="10h">Business Hours</button>
+        <button class="eh-btn eh-btn--chip" data-hour-mode="24h">All Day</button>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div class="eh-scroll-wrap">
+      <canvas id="eh2-canvas" class="eh-canvas" aria-label="Energy heatmap"></canvas>
+    </div>
+
+    <div id="eh2-legend" class="eh-legend"></div>
+    <div id="eh2-tooltip" class="eh-tooltip" style="display:none"></div>
+  </div>
+</div>
+
+<!-- ===== Custom Range Modal (2 calendars) ===== -->
+<div id="eh2-range-overlay" class="eh2-modal-overlay" style="display:none;">
+  <div class="eh2-modal">
+    <div class="eh2-modal-head">
+      <div class="title">Select time interval</div>
+      <button class="eh2-iconbtn" id="eh2-close" aria-label="Close">✕</button>
+    </div>
+
+    <div class="eh2-modal-body">
+      <div class="eh2-cal-wrap">
+        <!-- Left month -->
+        <div class="eh2-cal">
+          <div class="eh2-cal-head">
+            <button class="eh2-iconbtn" id="eh2-prevL" aria-label="Prev month">‹</button>
+            <div class="title" id="eh2-titleL"></div>
+            <button class="eh2-iconbtn" id="eh2-nextL" aria-label="Next month">›</button>
+          </div>
+          <div class="eh2-week"><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div><div>Su</div></div>
+          <div class="eh2-grid" id="eh2-gridL"></div>
+        </div>
+
+        <!-- Right month -->
+        <div class="eh2-cal">
+          <div class="eh2-cal-head">
+            <button class="eh2-iconbtn" id="eh2-prevR" aria-label="Prev month">‹</button>
+            <div class="title" id="eh2-titleR"></div>
+            <button class="eh2-iconbtn" id="eh2-nextR" aria-label="Next month">›</button>
+          </div>
+          <div class="eh2-week"><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div><div>Su</div></div>
+          <div class="eh2-grid" id="eh2-gridR"></div>
+        </div>
+      </div>
+
+      <!-- Quick actions -->
+      <div class="eh2-quick">
+        <span>Quick Choice</span>
+        <button id="eh2-week-cur" class="eh2-btn ghost">Current Week</button>
+        <button id="eh2-month-cur" class="eh2-btn ghost">Current Month</button>
+      </div>
+    </div>
+
+    <div class="eh2-modal-actions">
+      <button class="eh2-btn" id="eh2-cancel" type="button">Cancel</button>
+      <button class="eh2-btn primary" id="eh2-apply" type="button">Apply</button>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,94 @@
+/* energy-heatmap.css */
+
+/* ==== Card ==== */
+#eh2-root .eh-card{
+  display:flex; flex-direction:column; gap:12px;
+  height:100%; box-sizing:border-box; overflow:hidden;
+}
+
+/* ==== Header ==== */
+#eh2-header.eh-header{
+  display:flex; align-items:center; gap:12px; flex:0 0 auto;
+}
+#eh2-range-group{ display:flex; gap:8px; margin-left:70px; margin-right:auto; }
+#eh2-key-wrap{margin-right:73px;margin-left:auto;}
+#eh2-hour-mode-group{ display:flex; gap:8px; margin-left:auto; }
+
+.eh-btn--chip{
+  padding:6px 12px; border-radius:6px;
+  background:#f1f5f9; border:1px solid #d8e0ea;
+  font-weight:600; color:#0f172a; cursor:pointer; transition:.2s;
+}
+.eh-btn--chip:hover{ background:#e2e8f0; }
+/* đổi hồng -> #ED1C24 */
+.eh-btn--chip.active{
+  background:#ED1C24; color:#fff; border-color:#ED1C24;
+  box-shadow:0 2px 8px rgba(250,115,102,.25);
+}
+
+/* ==== Scroll container + Canvas ==== */
+.eh-scroll-wrap{ flex:1 1 auto; min-height:0; display:flex; align-items:stretch; justify-content:center;
+  width:100%; height:100%; overflow-x:auto; overflow-y:hidden; border-radius:12px; }
+.eh-scroll-wrap::-webkit-scrollbar{ height:8px; }
+.eh-scroll-wrap::-webkit-scrollbar-thumb{ background:#cbd5e1; border-radius:4px; }
+
+.eh-canvas,#eh2-canvas{
+  flex:1 1 auto; width:100% !important; height:100% !important;
+  display:block; background:#fff; border:none; border-radius:12px;
+  box-sizing:border-box; min-height:260px;
+}
+
+/* ==== Legend & Tooltip ==== */
+#eh2-root .eh-legend{ flex:0 0 auto; display:flex; justify-content:center; align-items:center;
+  gap:10px 14px; flex-wrap:wrap; padding-top:6px; min-height:32px; }
+#eh2-root .eh-tooltip{ position:absolute; pointer-events:none; display:none; z-index:20;
+  background:#0f172a; color:#fff; font-size:12px; line-height:1.35; padding:8px 10px; border-radius:8px;
+  box-shadow:0 8px 24px rgba(0,0,0,.18); }
+#eh2-legend{
+    margin-top:27px;
+}
+
+/* ===== Modal (2 calendars) ===== */
+.eh2-modal-overlay{ position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; z-index:9999; }
+.eh2-modal{
+  position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+  background:#fff; border-radius:12px; box-shadow:0 10px 30px rgba(2,6,23,.25);
+  min-width:640px; max-width:96vw; padding:14px;
+}
+
+.eh2-modal-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.eh2-modal-head .title{ font:600 16px/1.2 Arial; color:#0f172a; }
+.eh2-iconbtn{ width:28px; height:28px; border-radius:6px; border:1px solid #cbd5e1; background:#f8fafc; cursor:pointer; }
+
+.eh2-modal-body{ display:flex; flex-direction:column; gap:12px; }
+
+.eh2-cal-wrap{ display:flex; gap:16px; align-items:flex-start; }
+.eh2-cal{ background:#fff; border-radius:10px; padding:10px 10px 12px;
+  border:1px solid #e2e8f0; min-width:280px; }
+.eh2-cal-head{ display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.eh2-cal-head .title{ font:600 14px/1.2 Arial; color:#0f172a; }
+
+.eh2-week,.eh2-grid{ display:grid; grid-template-columns:repeat(7,32px); gap:4px; justify-content:center; }
+.eh2-week{ font:600 11px/28px Arial; color:#64748b; text-align:center; margin-bottom:2px; }
+.eh2-day{
+  width:32px; height:32px; line-height:32px; text-align:center; border-radius:8px; cursor:pointer;
+  user-select:none; font:13px Arial; color:#0f172a; transition:background .15s ease;
+}
+/* đổi light pink */
+.eh2-day:hover{ background:#fde2de; }
+.eh2-day.out{ opacity:.35; cursor:default; }
+.eh2-day.in{ background:#fde2de; }
+/* đổi #EC407A -> #ED1C24 */
+.eh2-day.sel{ background:#ED1C24; color:#fff; }
+/* đổi #E91E63 -> #ED1C24 */
+.eh2-day.edge{ background:#ED1C24; color:#fff; }
+
+.eh2-quick{ display:flex; gap:8px; align-items:center; margin-top:6px; }
+.eh2-btn{ padding:8px 12px; border-radius:10px; border:1px solid #e2e8f0; background:#f8fafc; cursor:pointer; }
+.eh2-btn.ghost{ background:#fff; }
+/* đổi #E91E63 -> #ED1C24 */
+.eh2-btn.primary{ background:#ED1C24; color:#fff; border-color:#ED1C24; }
+.eh2-modal-actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:10px; }
+#eh2-main {
+  gap: 0.5px; /* Giảm khoảng cách giữa heatmap và legend */
+}
