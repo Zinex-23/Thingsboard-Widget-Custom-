@@ -1,0 +1,19 @@
+.utc-hidden-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 4px;
+  box-sizing: border-box;
+}
+
+.utc-hidden-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #666;
+  background: transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
