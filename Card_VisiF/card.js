@@ -35,6 +35,16 @@
 
   let lastSig = null;
 
+  function getCompareKeyConfig() {
+    const s = (self.ctx && self.ctx.settings) ? self.ctx.settings : {};
+    const deltaName = s.compareDeltaKeyName || s.deltaKeyName || s.compareDeltaKey || s.deltaKey || '';
+    const percentName = s.comparePercentKeyName || s.percentKeyName || s.comparePercentKey || s.percentKey || '';
+    return {
+      deltaName: String(deltaName || '').trim(),
+      percentName: String(percentName || '').trim()
+    };
+  }
+
   function safeGetToken() {
     try { return localStorage.getItem('jwt_token') || localStorage.getItem('token') || ''; }
     catch (e) { return ''; }
@@ -199,10 +209,54 @@
     return normalizeKeyName(picked) || DEFAULT_KEY;
   }
 
+  function getEffectiveTimewindow() {
+    try {
+      const sub = self.ctx?.defaultSubscription;
+      const stw = sub?.subscriptionTimewindow || null;
+      const useDash = !!sub?.useDashboardTimewindow;
+      if (stw && !useDash) return stw;
+    } catch (e) { }
+    try {
+      return (
+        self.ctx?.dashboardTimewindow ||
+        self.ctx?.dashboard?.dashboardTimewindow ||
+        self.ctx?.dashboardCtrl?.dashboardTimewindow ||
+        self.ctx?.$scope?.dashboardTimewindow ||
+        self.ctx?.$scope?.dashboardCtrl?.dashboardTimewindow ||
+        null
+      );
+    } catch (e) { }
+    try {
+      const sub2 = self.ctx?.defaultSubscription;
+      return sub2?.subscriptionTimewindow || null;
+    } catch (e) { }
+    return null;
+  }
+
   function getTimeWindow() {
-    const tw = self.ctx.defaultSubscription?.subscriptionTimewindow;
-    const startTs = tw?.minTime || tw?.fixedWindow?.startTimeMs;
-    const endTs = tw?.maxTime || tw?.fixedWindow?.endTimeMs;
+    const tw = getEffectiveTimewindow();
+    if (!tw) return { startTs: null, endTs: null };
+
+    const fixed = tw.history?.fixedTimewindow;
+    if (fixed?.startTimeMs != null && fixed?.endTimeMs != null) {
+      return { startTs: fixed.startTimeMs, endTs: fixed.endTimeMs };
+    }
+    if (tw.startTs != null && tw.endTs != null) {
+      return { startTs: tw.startTs, endTs: tw.endTs };
+    }
+
+    const windowMs =
+      (tw.realtime?.timewindowMs != null) ? Number(tw.realtime.timewindowMs) :
+      (tw.history?.timewindowMs != null) ? Number(tw.history.timewindowMs) :
+      null;
+
+    if (windowMs && isFinite(windowMs)) {
+      const end = Date.now();
+      return { startTs: end - windowMs, endTs: end };
+    }
+
+    const startTs = tw.minTime || tw.fixedWindow?.startTimeMs || null;
+    const endTs = tw.maxTime || tw.fixedWindow?.endTimeMs || null;
     return { startTs, endTs };
   }
 
@@ -245,9 +299,76 @@
     sub.data = [sub.data[0]];
     sub.data[0].data = [[now, value]];
 
+    // Keep latestData array intact so additional latest data keys can update via TB
     if (Array.isArray(sub.latestData) && sub.latestData.length) {
-      sub.latestData = [sub.latestData[0]];
-      sub.latestData[0].data = [[now, value]];
+      const keyName = getConfiguredKeyName();
+      let updated = false;
+      for (let i = 0; i < sub.latestData.length; i++) {
+        const dk = sub.latestData[i]?.dataKey;
+        const dkName = normalizeKeyName(dk?.name || dk?.label || '');
+        if (dkName && dkName === normalizeKeyName(keyName)) {
+          sub.latestData[i].data = [[now, value]];
+          updated = true;
+        }
+      }
+      // Fallback: update first entry only if no match found
+      if (!updated) {
+        sub.latestData[0].data = [[now, value]];
+      }
+    }
+  }
+
+  function updateLatestCompareKeys(currentValue, prevValue) {
+    const sub = self.ctx.defaultSubscription;
+    if (!sub || !Array.isArray(sub.latestData) || !sub.latestData.length) return;
+
+    const now = Date.now();
+    const delta = Number(currentValue || 0) - Number(prevValue || 0);
+    const pct = (Number(prevValue || 0) === 0) ? 0 : (delta / Number(prevValue)) * 100;
+
+    const cfg = getCompareKeyConfig();
+    const wantDelta = cfg.deltaName;
+    const wantPct = cfg.percentName;
+
+    function pickTypeFromDataKey(dk) {
+      const raw = String(dk?.label || dk?.name || '').toLowerCase();
+      if (!raw) return '';
+      if (raw.includes('%') || raw.includes('percent') || raw.includes('pct') || raw.includes('ratio')) return 'pct';
+      if (raw.includes('delta') || raw.includes('diff') || raw.includes('change') || raw.includes('compare') || raw.includes('vs') ||
+          raw.includes('chenh') || raw.includes('chênh') || raw.includes('so sanh') || raw.includes('so sánh') ||
+          raw.includes('増減') || raw.includes('差分')) return 'delta';
+      return '';
+    }
+
+    let assigned = 0;
+    for (let i = 0; i < sub.latestData.length; i++) {
+      const dk = sub.latestData[i]?.dataKey;
+      const dkRaw = String(dk?.name || dk?.label || '').trim();
+      if (wantDelta && dkRaw === wantDelta) {
+        sub.latestData[i].data = [[now, delta]];
+        assigned++;
+        continue;
+      }
+      if (wantPct && dkRaw === wantPct) {
+        sub.latestData[i].data = [[now, pct]];
+        assigned++;
+        continue;
+      }
+
+      const type = pickTypeFromDataKey(dk);
+      if (type === 'delta') {
+        sub.latestData[i].data = [[now, delta]];
+        assigned++;
+      } else if (type === 'pct') {
+        sub.latestData[i].data = [[now, pct]];
+        assigned++;
+      }
+    }
+
+    // Fallback by position if no label match (common: 2 latest keys)
+    if (assigned === 0 && sub.latestData.length >= 2) {
+      sub.latestData[0].data = [[now, delta]];
+      sub.latestData[1].data = [[now, pct]];
     }
   }
 
@@ -333,6 +454,14 @@
     return 0;
   }
 
+  function getPrevWindow(startTs, endTs) {
+    const s = Number(startTs || 0);
+    const e = Number(endTs || 0);
+    if (!s || !e || e <= s) return null;
+    const span = e - s;
+    return { startTs: s - span, endTs: s };
+  }
+
   async function computeAllDevices(deviceIds, keyName, startTs, endTs, signal) {
     const per = await Promise.all(deviceIds.map(async (id) => {
       const v = await computeDeviceValue(id, keyName, startTs, endTs, signal);
@@ -393,6 +522,17 @@
       });
     }
 
+    // Listen timewindow changes (UTC widget updates dashboard timewindow)
+    try {
+      const d = self.ctx?.dashboard || self.ctx?.dashboardCtrl;
+      const subj = d?.dashboardTimewindowChangedSubject || self.ctx?.dashboardTimewindowChangedSubject;
+      if (subj && typeof subj.subscribe === 'function') {
+        self.timewindowSubscription = subj.subscribe(function () {
+          scheduleRefresh('timewindowChanged');
+        });
+      }
+    } catch (e) { }
+
     scheduleRefresh('init');
   };
 
@@ -443,6 +583,10 @@
       self.stateSubscription.unsubscribe();
       self.stateSubscription = null;
     }
+    if (self.timewindowSubscription) {
+      try { self.timewindowSubscription.unsubscribe(); } catch (e) { }
+      self.timewindowSubscription = null;
+    }
 
     try { if (activeAbort) activeAbort.abort(); } catch (e) { }
     activeAbort = null;
@@ -481,6 +625,10 @@
       hideOverlay();
       return;
     }
+    // Use widget-calculated values (no custom aggregation)
+    hideOverlay();
+    renderCard();
+    return;
 
     if (!isAllMode) {
       if (!singleId || singleId === '__ALL__') {
@@ -499,11 +647,17 @@
       try {
         const keyName = getConfiguredKeyName();
         const value = await computeDeviceValue(singleId, keyName, startTs, endTs, controller.signal);
+        let prevValue = 0;
+        const prev = getPrevWindow(startTs, endTs);
+        if (prev) {
+          prevValue = await computeDeviceValue(singleId, keyName, prev.startTs, prev.endTs, controller.signal);
+        }
 
         if (controller.signal.aborted) return;
         if (mySeq !== fetchSeq) return;
 
         injectAggregatedValueToSubscription(value);
+        updateLatestCompareKeys(value, prevValue);
         renderCard();
         hideOverlay();
       } catch (e) {
@@ -542,6 +696,11 @@
 
       const keyName = getConfiguredKeyName();
       const value = await computeAllDevices(ids, keyName, startTs, endTs, controller.signal);
+      let prevValue = 0;
+      const prev = getPrevWindow(startTs, endTs);
+      if (prev) {
+        prevValue = await computeAllDevices(ids, keyName, prev.startTs, prev.endTs, controller.signal);
+      }
 
       if (controller.signal.aborted) return;
       if (mySeq !== fetchSeq) return;
@@ -550,6 +709,7 @@
       if (buildSignature() !== lastSig) return;
 
       injectAggregatedValueToSubscription(value);
+      updateLatestCompareKeys(value, prevValue);
       renderCard();
       hideOverlay();
     } catch (e) {
