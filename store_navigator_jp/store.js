@@ -583,9 +583,20 @@ function ensureStoreDropdownManager() {
             var a = anchorEl.getBoundingClientRect();
             var fe = window.frameElement;
             var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
+            var scaleX = 1;
+            var scaleY = 1;
+            if (fe) {
+                var feW = fe.clientWidth || fe.offsetWidth || f.width || 0;
+                var feH = fe.clientHeight || fe.offsetHeight || f.height || 0;
+                if (feW && f.width) scaleX = f.width / feW;
+                if (feH && f.height) scaleY = f.height / feH;
+            }
+            var vv = (window.top || window).visualViewport;
+            var vvLeft = vv && typeof vv.offsetLeft === 'number' ? vv.offsetLeft : 0;
+            var vvTop = vv && typeof vv.offsetTop === 'number' ? vv.offsetTop : 0;
             var gap = 6;
-            var left = f.left + a.left;
-            var top = f.top + a.bottom + gap;
+            var left = f.left + (a.left * scaleX) + vvLeft;
+            var top = f.top + (a.bottom * scaleY) + vvTop + gap;
             var vw = (window.top || window).innerWidth;
             var vh = (window.top || window).innerHeight;
             var dd = this.dropdown;
@@ -595,7 +606,7 @@ function ensureStoreDropdownManager() {
             if (top + ddH + gap > vh) top = Math.max(gap, f.top + a.top - ddH - gap);
             dd.style.left = Math.max(gap, left) + 'px';
             dd.style.top = Math.max(gap, top) + 'px';
-            dd.style.width = Math.max(160, a.width) + 'px';
+            dd.style.width = Math.max(160, a.width * scaleX) + 'px';
         },
         close: function () {
             if (!this.overlay) return;
