@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ヒストグラム プレビュー</title>
+  <link rel="stylesheet" href="./histogram.css" />
+  <style>
+    body{margin:0;background:#f3f4f6;font-family:Inter,Segoe UI,Arial,sans-serif;}
+    .preview-wrap{
+      width: 920px; max-width: 96vw;
+      height: 520px; margin: 24px auto;
+      padding: 12px;
+      background: #ffffff; border-radius: 14px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+  </style>
+</head>
+<body>
+  <div id="preview-root" class="preview-wrap">
+    <div id="tb-hist-root" class="tbw-root">
+      <div id="tb-hist-legend" class="tbw-legend"></div>
+      <div id="tb-hist-chartwrap" class="tbw-chart">
+        <canvas id="histCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function(){
+      var now = Date.now();
+      var ages = [];
+      var genders = [];
+      // Fake distribution: mostly 18-45, some 46-65, few 66+
+      function pushRange(min,max,count,gender){
+        for (var i=0;i<count;i++){
+          ages.push(Math.floor(Math.random()*(max-min+1))+min);
+          genders.push(gender);
+        }
+      }
+      pushRange(18, 30, 120, 'female');
+      pushRange(18, 30, 110, 'male');
+      pushRange(31, 45, 90, 'female');
+      pushRange(31, 45, 95, 'male');
+      pushRange(46, 65, 40, 'female');
+      pushRange(46, 65, 45, 'male');
+      pushRange(66, 80, 10, 'female');
+      pushRange(66, 80, 8, 'male');
+
+      window.self = window.self || window;
+      window.self.ctx = {
+        $container: [document.getElementById('preview-root')],
+        dashboard: { title: '年齢分布ヒストグラム' },
+        defaultSubscription: {
+          useDashboardTimewindow: true,
+          subscriptionTimewindow: {
+            history: { fixedTimewindow: { startTimeMs: now - 7*24*60*60*1000, endTimeMs: now } }
+          },
+          datasources: [
+            { entityId: { id: 'device-a' }, name: 'デバイスA', entityName: 'デバイスA' }
+          ],
+          data: [
+            {
+              dataKey: { name: 'ages' },
+              datasource: { name: 'デバイスA' },
+              data: [[now-10000, JSON.stringify(ages)]],
+              latestData: [[now, JSON.stringify(ages)]]
+            },
+            {
+              dataKey: { name: 'gender' },
+              datasource: { name: 'デバイスA' },
+              data: [[now-10000, JSON.stringify(genders)]],
+              latestData: [[now, JSON.stringify(genders)]]
+            }
+          ]
+        },
+        stateController: {
+          getStateParams: function(){ return { selectedDeviceMode: 'SINGLE', selectedDeviceId: 'device-a' }; },
+          stateChanged: function(){ return { subscribe: function(){ return { unsubscribe: function(){} }; } }; }
+        }
+      };
+    })();
+  </script>
+  <script src="./histogram.js"></script>
+  <script>
+    // Preview tweaks
+    try {
+      window.POLL_SELECTION_ENABLED = false;
+      window.ENABLE_ALL_DEVICES_MODE = false;
+      window.USE_MOCK = false;
+      if (window.self && typeof window.self.onInit === 'function') {
+        window.self.onInit();
+      }
+    } catch (e) { console.error(e); }
+  </script>
+</body>
+</html>

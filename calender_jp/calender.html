@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TB カレンダーウィジェット</title>
+  <link rel="stylesheet" href="widget.css"/>
+</head>
+<body>
+  <!-- Root container -->
+  <div id="cal-root" class="tb-cal">
+    <div class="tb-cal__header">
+      <div class="tb-title-group">
+        <button class="tb-cal__btn" data-nav="-1" title="前の月">‹</button>
+        <div class="tb-cal__title"></div>
+        <button class="tb-cal__btn" data-nav="1" title="次の月">›</button>
+      </div>
+    </div>
+
+    <div class="tb-cal__compare-row"></div>
+
+    <div class="tb-cal__toolbar">
+      <!-- Customer -->
+      <div class="tb-key-wrap tb-field">
+        <span>顧客:</span>
+        <select id="tb-key-select" class="tb-select"></select>
+      </div>
+
+      <!-- Compare -->
+      <div class="tb-compare-wrap tb-field" style="margin-left:16px;">
+        <span>比較:</span>
+        <select id="tb-compare-select" class="tb-select">
+          <option value="prevDay">前日</option>
+          <option value="prevWeek" selected>先週</option>
+          <option value="prevMonth">先月</option>
+          <option value="prevYear">昨年</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="tb-cal__weekdays"></div>
+    <div class="tb-cal__grid" id="tb-cal-grid"></div>
+  </div>
+
+  <script src="widget.js"></script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+/* Root */
+.tbw-root{
+  width:100%; height:100%;
+  display:flex; flex-direction:column;
+  background:#fff; border-radius:8px;
+}
+
+/* Header */
+.tbw-header{ display:flex; align-items:baseline; gap:12px; padding:5px 12px 0 12px; }
+.tbw-title{ font-weight:700; font-size:15px; line-height:1.2; color:#0f172a; }
+.tbw-subtitle{ font-size:12px; color:#64748b; line-height:1.2; }
+
+/* Controls */
+.tbw-controls{ display:flex; flex-direction:column; gap:8px; padding:8px 12px 0 12px; }
+
+.tbw-btn-group{ display:flex; gap:8px; flex-wrap:wrap; }
+.tbw-range-btn{
+  padding:6px 12px;
+  border:1px solid #cbd5e1; background:#f8fafc; color:#0f172a;
+  border-radius:8px; cursor:pointer; font-size:13px;
+  transition:background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.tbw-range-btn:hover{ background:#eef2f7; }
+.tbw-range-btn.active{
+  background:#2563eb; color:#fff; border-color:#2563eb;
+  box-shadow:0 1px 2px rgba(37,99,235,.25);
+}
+
+/* Legend */
+.tbw-legend{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:16px; padding:8px 12px 0 12px;
+  justify-items:center;
+  justify-content:center;
+}
+#tooltip{
+  border: "3px solid #ED1C24"!important;
+  background: #FFFFFF;
+}
+.tbw-legend > div{
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:10px;
+  min-width:160px;
+}
+/* Chart */
+.tbw-chart{
+  flex:1 1 auto; min-height:220px;
+  padding:8px 12px 12px 12px;
+}
+#histCanvas{ width:100%; height:100%; display:block; }
+
+/* ==== Calendar Overlay (giống scatter) ==== */
+:root{
+  --hs-cell: clamp(32px, 9vw, 40px);
+  --hs-gap: clamp(6px, 1.5vw, 8px);
+}
+/* Animation cho histCanvas */
+#histCanvas {
+  width:100%; height:100%; display:block;
+  opacity:0;
+  transform:scale(0.95);
+  animation: histFadeIn .5s ease-out forwards;
+}
+
+@keyframes histFadeIn {
+  to {
+    opacity:1;
+    transform:scale(1);
+  }
+}
+
+.hscal-modal{
+  position:fixed; inset:0; background:rgba(0,0,0,.4);
+  display:flex; align-items:center; justify-content:center; z-index:10000;
+  opacity:0; visibility:hidden; transition:all .25s ease; padding:10px;
+}
+.hscal-modal.show{ opacity:1; visibility:visible; }
+.hscal-container{
+  background:#fff; border-radius:16px; padding:16px;
+  box-shadow:0 24px 64px rgba(0,0,0,.15);
+  width:min(95vw,440px); max-height:90vh; overflow:auto;
+  transform:scale(.95); transition:transform .25s ease;
+}
+.hscal-modal.show .hscal-container{ transform:scale(1); }
+.hscal-header{ text-align:center; margin-bottom:12px; }
+.hscal-title{ font-size:16px; font-weight:600; margin:0 0 6px; color:#0f172a;}
+.hscal-sub{ font-size:12px; color:#64748b; }
+.hscal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; gap:12px; }
+.hscal-navbtn{ padding:6px 10px; font-size:12px; cursor:pointer; background:#f9fafb; border:1px solid #e0e7ff; border-radius:8px; color:#475569; }
+.hscal-navbtn:hover{ background:#e0e7ff; }
+.hscal-monthyear{ font-size:16px; font-weight:600; flex:1; text-align:center; color:#0f172a; }
+.hscal-grid{ display:grid; grid-template-columns:repeat(7, var(--hs-cell)); gap:var(--hs-gap); justify-content:center; margin-bottom:12px; }
+.hscal-dow{ text-align:center; font-size:11px; font-weight:600; color:#64748b; padding:4px 0; }
+.hscal-day{
+  width:var(--hs-cell); height:var(--hs-cell); display:flex; align-items:center; justify-content:center;
+  border-radius:8px; font-size:12px; cursor:pointer; background:#fff; border:1px solid #e0e7ff; transition:background .2s, transform .2s;
+}
+.hscal-day:hover{ background:#eef2ff; transform: translateY(-1px); }
+.hscal-day.other{ color:#cbd5e1; border-color: transparent; }
+.hscal-day.selected{ background:#6366f1; color:#fff; border-color: #6366f1; }
+.hscal-day.in-range{ background:#eef2ff; color:#1e40af; border-color: #c7d2fe; }
+.hscal-day.start{ background:#22c55e; color:#fff; border-color: #22c55e; }
+.hscal-day.end{ background:#ef4444; color:#fff; border-color: #ef4444; }
+.hscal-actions{
+  display:flex; align-items:center; justify-content:space-between; margin-top:12px; padding-top:12px; border-top:1px solid #e0e7ff; gap:12px; flex-wrap:wrap;
+}
+.hscal-info{ font-size:12px; color:#64748b; flex:1; min-width:120px; }
+.hscal-btns{ display:flex; gap:12px; }
+.hscal-btn{ padding:8px 14px; font-size:12px; border:none; border-radius:8px; cursor:pointer; }
+.hscal-primary{ background:#22c55e; color:#fff; } .hscal-primary:hover{ background:#16a34a; }
+.hscal-secondary{ background:#6b7280; color:#fff; } .hscal-secondary:hover{ background:#4b5563; }

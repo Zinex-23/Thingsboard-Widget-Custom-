@@ -61,7 +61,7 @@ self.onDestroy = function () {
 };
 
 async function init() {
-    setStatus('Loading device types...');
+    setStatus('デバイスタイプを読み込み中…');
     try {
         // //console.log('[store_type] Initializing widget...');
         const types = await fetchDeviceTypes();
@@ -106,12 +106,12 @@ async function init() {
                 await forceAllThenDevice(types[0], self.deviceSelect.value);
             } else {
                 // //console.warn('[store_type] No device types found');
-                setStatus('No device types available');
+                setStatus('利用可能なデバイスタイプがありません');
             }
         }
     } catch (error) {
         // //console.error('[store_type] Error in init():', error);
-        setStatus('Error loading device types: ' + error.message);
+        setStatus('デバイスタイプの読み込みに失敗しました');
     }
 }
 
@@ -203,7 +203,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
         fillSelect(self.deviceSelect, [], null);
         return;
     }
-    setStatus('Loading devices...');
+    setStatus('デバイスを読み込み中…');
     try {
         self.isLoadingOptions = true;
         // //console.log('[store_type] Loading devices for type:', type);
@@ -231,7 +231,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
             // Multiple devices (or 0): Keep "All devices" option, auto-select it
             // //console.log('[store_type] Multiple devices detected. Adding "All devices" option.');
             deviceOptions = [
-                { value: '__ALL__', label: `All devices` },
+                { value: '__ALL__', label: '全デバイス' },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
             defaultSelection = devices.length ? devices[0].id : '__ALL__';
@@ -263,7 +263,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
         if (Array.isArray(cached) && cached.length) {
             const deviceOptions = cached.length === 1
                 ? cached.map(d => ({ value: d.id, label: d.name }))
-                : [{ value: '__ALL__', label: 'All devices' }, ...cached.map(d => ({ value: d.id, label: d.name }))];
+                : [{ value: '__ALL__', label: '全デバイス' }, ...cached.map(d => ({ value: d.id, label: d.name }))];
             fillSelect(self.deviceSelect, deviceOptions, null);
             const preferred = preferredDeviceId || (self.lastSelection && self.lastSelection.deviceType === type ? self.lastSelection.deviceId : null);
             if (preferred && deviceOptions.some(opt => opt.value === preferred)) {
@@ -279,7 +279,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
             return;
         }
         // //console.error('[store_type] Error loading devices:', error);
-        setStatus('Error loading devices: ' + error.message);
+        setStatus('デバイスの読み込みに失敗しました');
     } finally {
         setTimeout(() => { self.isLoadingOptions = false; }, 0);
     }
@@ -429,7 +429,7 @@ async function fetchDevices(deviceType, signal) {
 
         if (!customerId) {
             // //console.error('[store_type] ❌ Could not find customerId for CUSTOMER_USER:', user);
-            throw new Error('Customer ID not found for current user');
+            throw new Error('現在のユーザーの顧客IDが見つかりません');
         }
 
         url = `/api/customer/${customerId}/deviceInfos?pageSize=${pageSize}&page=${page}&type=${encodeURIComponent(deviceType)}`;

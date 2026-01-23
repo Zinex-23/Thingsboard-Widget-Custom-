@@ -286,7 +286,7 @@ function buildKeyDropdown(){
 
   collectDataKeys();
 
-  wrap.innerHTML = `<label>Customer:</label><select id="${ids.keySelect}"></select>`;
+  wrap.innerHTML = `<label>顧客:</label><select id="${ids.keySelect}"></select>`;
   var sel=getEl(ids.keySelect);
   sel.innerHTML='';
 
@@ -459,7 +459,7 @@ var modalState = { start:null, end:null, base:null };
 function daysInMonth(y,m){ return new Date(y,m+1,0).getDate(); }
 function firstOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
 function addMonths(d,n){ return new Date(d.getFullYear(), d.getMonth()+n, 1); }
-function monthLabel(d){ return d.toLocaleDateString('en-GB',{month:'short', year:'numeric'}); }
+function monthLabel(d){ return d.toLocaleDateString('ja-JP',{month:'short', year:'numeric'}); }
 function mondayOfCurrentWeek(now){
   var dow=(now.getDay()+6)%7; var mon=new Date(now);
   mon.setDate(now.getDate()-dow);
@@ -583,7 +583,7 @@ function openRangeModal(){
   overlay.onclick = function(ev){ if (ev.target===overlay) closeOverlay(); };
 
   safeOn(ids.apply, function(){
-    if (!modalState.start){ alert('Select start date'); return; }
+    if (!modalState.start){ alert('開始日を選択してください'); return; }
     if (!modalState.end) modalState.end = modalState.start;
     var s = startOfDay(modalState.start), e = endOfDay(modalState.end);
     if (e < s){ var t=s; s=e; e=t; }
@@ -685,7 +685,7 @@ function drawNoData(msg){
   ctx.font='14px Arial';
   ctx.textAlign='center';
   ctx.textBaseline='middle';
-  ctx.fillText(msg||'No data', c.width/2, c.height/2);
+  ctx.fillText(msg||'データなし', c.width/2, c.height/2);
 }
 
 function computeDomainMax(map){
@@ -750,8 +750,8 @@ function drawHeatmap(map){
     var y = padT + d*ch + ch/2;
     var date = new Date(startOfDay(startMs).getTime() + d*MS.day);
     var label = compact
-      ? date.toLocaleDateString("en-GB",{day:"2-digit",month:"short"})
-      : date.toLocaleDateString("en-GB",{weekday:"short",day:"2-digit",month:"short"});
+      ? date.toLocaleDateString("ja-JP",{day:"2-digit",month:"short"})
+      : date.toLocaleDateString("ja-JP",{weekday:"short",day:"2-digit",month:"short"});
 
     ctx.fillText(label, padL-8, y);
   }
@@ -910,12 +910,12 @@ function safeSetupTooltip(){
     var h0=String(hh).padStart(2,'0')+":00";
     var h1=String((hh+1)%24).padStart(2,'0')+":00";
 
-    var ds=date.toLocaleDateString('en-GB',{weekday:'short',year:'numeric',month:'short',day:'2-digit'});
+    var ds=date.toLocaleDateString('ja-JP',{weekday:'short',year:'numeric',month:'short',day:'2-digit'});
 
     if(!cell.has){
-      show(ev.clientX,ev.clientY,`<b>${ds}</b><br>${h0} – ${h1}<br><b>No data</b>`);
+      show(ev.clientX,ev.clientY,`<b>${ds}</b><br>${h0} – ${h1}<br><b>データなし</b>`);
     } else {
-      show(ev.clientX,ev.clientY,`<b>${ds}</b><br>${h0} – ${h1}<br>People: <b>${formatInt(v)}</b>`);
+      show(ev.clientX,ev.clientY,`<b>${ds}</b><br>${h0} – ${h1}<br>人数: <b>${formatInt(v)}</b>`);
     }
   });
 
@@ -979,7 +979,7 @@ function onDataUpdatedInternal(){
   }
 
   updateCanvasSize();
-  drawNoData('Loading...');
+  drawNoData('読み込み中…');
   domainMax = 0;
   renderLegend();
 
@@ -994,7 +994,7 @@ function onDataUpdatedInternal(){
     if (!selectedKeyId){
       domainMax = 0;
       renderLegend();
-      drawNoData('No data');
+      drawNoData('データなし');
       return;
     }
 
@@ -1006,7 +1006,7 @@ function onDataUpdatedInternal(){
       var allDeviceIds = getAllDeviceIdsFromState(stateParams);
       if (!allDeviceIds || allDeviceIds.length===0){
         domainMax = 0; renderLegend();
-        drawNoData('No data');
+        drawNoData('データなし');
         return;
       }
 
@@ -1032,14 +1032,14 @@ function onDataUpdatedInternal(){
     // ===== SINGLE MODE =====
     if (!self.ctx.data || self.ctx.data.length<1){
       domainMax = 0; renderLegend();
-      drawNoData('No data');
+      drawNoData('データなし');
       return;
     }
 
     var items=(self.ctx.data||[]).filter(function(it){ return keyIdOf(it)===selectedKeyId; });
     if (!items.length){
       domainMax = 0; renderLegend();
-      drawNoData('No data');
+      drawNoData('データなし');
       return;
     }
 
@@ -1127,7 +1127,7 @@ self.onInit = function(){
   renderLegend();
 
   updateCanvasSize();
-  drawNoData('Loading...');
+  drawNoData('読み込み中…');
 
   __lastSig = buildSignature();
   startPollingSelection();

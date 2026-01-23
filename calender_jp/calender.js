@@ -12,14 +12,14 @@ var DEFAULTS = {
   deltaDownColor: '#dc2626',
   deltaZeroColor: '#94a3b8',
   showTodayDot: true,
-  locale: 'en-US',
-  weekdayNames: ['MON','TUE','WED','THU','FRI','SAT','SUN'],
+  locale: 'ja-JP',
+  weekdayNames: ['月','火','水','木','金','土','日'],
   keyLabelMap: null,
   // Compare mode: prevDay | prevWeek | prevMonth | prevYear
   compareMode: 'prevDay',
 
   // Loading text
-  loadingText: 'Loading...'
+  loadingText: '読み込み中…'
 };
 var S = DEFAULTS;
 
@@ -160,12 +160,12 @@ function ensureLoadingOverlay(){
   if (!el) {
     el = document.createElement('div');
     el.className = 'tb-cal__loading';
-    el.innerHTML = `<div class="tb-cal__spinner"></div><div class="tb-cal__loading-text">${S.loadingText||'Loading...'}</div>`;
+    el.innerHTML = `<div class="tb-cal__spinner"></div><div class="tb-cal__loading-text">${S.loadingText||'読み込み中…'}</div>`;
     root.appendChild(el);
   }
   // sync text
   var t = el.querySelector('.tb-cal__loading-text');
-  if (t) t.textContent = S.loadingText || 'Loading...';
+  if (t) t.textContent = S.loadingText || '読み込み中…';
   return el;
 }
 function showLoading(){
@@ -469,14 +469,14 @@ function renderGrid(){
   var pct = (prevSum ? (diff / prevSum) * 100 : null);
 
   var sentence = '';
-  if (prevSum === 0 && curSum === 0) sentence = 'No data for this month.';
-  else if (pct === null) sentence = "This month's total: " + absCur + "  Compared to last month: " + (diff === 0 ? 'no change' : (diff > 0 ? '↑ +' : '↓ -') + absDiff) + ".";
-  else if (diff === 0) sentence = "This month's total: " + absCur + "  No change vs last month.";
-  else {
-    var pctStr = (diff > 0 ? '+' : '') + Math.abs(pct).toFixed(S.deltaDecimals) + '%';
-    var verb = diff > 0 ? 'Increased' : 'Decreased';
-    sentence = "This month's total: " + absCur + "  " + verb + " " + (diff>0?'+':'-') + absDiff + " (" + pctStr + ") vs last month.";
-  }
+    if (prevSum === 0 && curSum === 0) sentence = '今月のデータはありません。';
+    else if (pct === null) sentence = "今月の合計: " + absCur + "　先月比: " + (diff === 0 ? '変化なし' : (diff > 0 ? '↑ +' : '↓ -') + absDiff) + "。";
+    else if (diff === 0) sentence = "今月の合計: " + absCur + "　先月比: 変化なし。";
+    else {
+      var pctStr = (diff > 0 ? '+' : '') + Math.abs(pct).toFixed(S.deltaDecimals) + '%';
+      var verb = diff > 0 ? '増加' : '減少';
+      sentence = "今月の合計: " + absCur + "　先月比: " + (diff>0?'+':'-') + absDiff + "（" + pctStr + "）" + verb + "。";
+    }
   compareEl.textContent = sentence;
   compareEl.style.color = diff > 0 ? S.deltaUpColor : (diff < 0 ? S.deltaDownColor : S.deltaZeroColor);
   compareRow.innerHTML = ''; compareRow.appendChild(compareEl);
@@ -560,16 +560,16 @@ function renderGrid(){
         var deltaStr = (pctDay>0?'+':'') + fmtPercent(pctDay);
 
         var anchorLabel =
-          S.compareMode==='prevDay'   ? 'Prev day'   :
-          S.compareMode==='prevWeek'  ? 'Prev week'  :
-          S.compareMode==='prevMonth' ? 'Prev month' : 'Prev year';
+          S.compareMode==='prevDay'   ? '前日'   :
+          S.compareMode==='prevWeek'  ? '先週'  :
+          S.compareMode==='prevMonth' ? '先月' : '昨年';
 
         var tooltip = document.createElement('div');
         tooltip.className = 'tb-tooltip';
         tooltip.innerHTML = '<div class="tb-tip-date">'+dateStr+'</div>'+
-          '<div class="tb-tip-line">Current: <b>'+valStr+'</b></div>'+
+          '<div class="tb-tip-line">現在: <b>'+valStr+'</b></div>'+
           '<div class="tb-tip-line">'+anchorLabel+': <b>'+prevStr+'</b></div>'+
-          '<div class="tb-tip-line">Change: <span style="color:'+(pctDay>0?S.deltaUpColor:(pctDay<0?S.deltaDownColor:S.deltaZeroColor))+'">'+deltaStr+'</span></div>';
+          '<div class="tb-tip-line">変化: <span style="color:'+(pctDay>0?S.deltaUpColor:(pctDay<0?S.deltaDownColor:S.deltaZeroColor))+'">'+deltaStr+'</span></div>';
         cell.appendChild(tooltip);
 
       } else if (hasVal) {
@@ -585,7 +585,7 @@ function renderGrid(){
         var tooltip2 = document.createElement('div');
         tooltip2.className = 'tb-tooltip';
         tooltip2.innerHTML = '<div class="tb-tip-date">'+dateStr2+'</div>'+
-          '<div class="tb-tip-line">Current: <b>'+valStr2+'</b></div>';
+          '<div class="tb-tip-line">現在: <b>'+valStr2+'</b></div>';
         cell.appendChild(tooltip2);
       }
     }

@@ -369,24 +369,50 @@ self.onInit = function () {
         return { s: s, e: e, i: i };
     }
 
-    function applyTimewindow(startMs, endMs, intervalMs) {
+    function getDashboardTimewindow() {
+        var d = self.ctx && self.ctx.dashboard ? self.ctx.dashboard : {};
+        var tw = d.dashboardTimewindow;
+        if (!tw && d.getDashboardTimewindow) tw = d.getDashboardTimewindow();
+        return tw || null;
+    }
+
+    function applyTimewindow(startMs, endMs, intervalMs, force) {
         // tránh re-entrant
         if (_isApplyingTW) return;
         var cur = getCurrentTW();
         var target = { s: startMs, e: endMs, i: intervalMs };
-        if (softEqualTW(cur, target)) return;
+        if (!force && softEqualTW(cur, target)) return;
 
         _isApplyingTW = true;
 
+        var existing = getDashboardTimewindow() || {};
+        var aggType = existing && existing.aggregation && existing.aggregation.type ? existing.aggregation.type : 'SUM';
+        var aggLimit = existing && existing.aggregation && typeof existing.aggregation.limit === 'number'
+            ? existing.aggregation.limit
+            : 25000;
+        var aggInterval = (aggType === 'NONE')
+            ? ((existing.aggregation && typeof existing.aggregation.interval === 'number') ? existing.aggregation.interval : 0)
+            : intervalMs;
+        var histInterval = (aggType === 'NONE')
+            ? ((existing.history && typeof existing.history.interval === 'number') ? existing.history.interval : 0)
+            : intervalMs;
+        var historyType = existing && existing.history && typeof existing.history.historyType === 'number'
+            ? existing.history.historyType
+            : 1;
+
         var tw = {
-            hideInterval: false, hideQuickInterval: false, hideAggregation: false, hideAggInterval: false, hideTimezone: false,
+            hideInterval: existing.hideInterval === true,
+            hideQuickInterval: existing.hideQuickInterval === true,
+            hideAggregation: existing.hideAggregation === true,
+            hideAggInterval: existing.hideAggInterval === true,
+            hideTimezone: existing.hideTimezone === true,
             selectedTab: 1,
             realtime: { realtimeType: 0, interval: 1000, timewindowMs: 60000 },
             history: {
-                historyType: 1, interval: intervalMs, timewindowMs: endMs - startMs,
+                historyType: historyType, interval: histInterval, timewindowMs: endMs - startMs,
                 fixedTimewindow: { startTimeMs: startMs, endTimeMs: endMs }
             },
-            aggregation: { type: 'SUM', limit: 25000, interval: intervalMs }
+            aggregation: { type: aggType, limit: aggLimit, interval: aggInterval }
 
         };
         try {
@@ -448,7 +474,7 @@ self.onInit = function () {
             if (_userInteracted || _appliedInitialTW) { cancelInitialRetries(); return; }
             var cur = getCurrentTW();
             if (softEqualTW(cur, target)) { _appliedInitialTW = true; cancelInitialRetries(); return; }
-            applyTimewindow(target.s, target.e, target.i);
+            applyTimewindow(target.s, target.e, target.i, true);
             // đánh dấu đã apply 1 lần để không lặp
             _appliedInitialTW = true;
             cancelInitialRetries();

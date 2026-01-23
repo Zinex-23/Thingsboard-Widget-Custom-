@@ -6,12 +6,10 @@
   // 'SUM_BUCKETS' | 'DELTA_MAX_MIN' | 'POSITIVE_DELTAS'
   const AGG_MODE = 'SUM_BUCKETS';
 
-  const POLL_INTERVAL_MS = 250;
-  const VERIFY_RUNS = 3;           // verify 3x
-  const RETRY_DELAY_MS = 250;
-  const UPDATE_DEBOUNCE_MS = 80;
-  const QUIET_TIME_MS = 250;       // coalesce rapid state/timewindow changes
-  const SAME_SIG_SKIP_WINDOW_MS = 800;
+  const UPDATE_DEBOUNCE_MS = 120;
+  const QUIET_TIME_MS = 220;       // coalesce rapid state/timewindow changes
+  const SAME_SIG_SKIP_WINDOW_MS = 600;
+  const OVERLAY_DELAY_MS = 180;    // avoid flicker on fast refreshes
   // ===========================================
 
   let pendingUpdateTimeout = null;
@@ -23,17 +21,18 @@
   let needsRerun = false;
 
   let originalSubBackup = null;
+  let lastModeApplied = null;
+  let lastSingleIdApplied = null;
 
   // overlay
   let overlayEl = null;
   let overlayStyleEl = null;
+  let overlayTimer = null;
 
   // version + abort
   let fetchSeq = 0;
   let activeAbort = null;
 
-  // polling signature
-  let pollTimer = null;
   let lastSig = null;
 
   function safeGetToken() {
@@ -85,8 +84,22 @@
     host.appendChild(overlayEl);
   }
 
-  function showOverlay() { ensureOverlay(); overlayEl && overlayEl.classList.add('show'); }
-  function hideOverlay() { overlayEl && overlayEl.classList.remove('show'); }
+  function showOverlayDelayed() {
+    if (overlayTimer) clearTimeout(overlayTimer);
+    overlayTimer = setTimeout(() => {
+      ensureOverlay();
+      if (overlayEl) {
+        overlayEl.classList.add('show');
+      }
+    }, OVERLAY_DELAY_MS);
+  }
+  function hideOverlay() {
+    if (overlayTimer) {
+      clearTimeout(overlayTimer);
+      overlayTimer = null;
+    }
+    if (overlayEl) overlayEl.classList.remove('show');
+  }
 
   function extractDeviceId(ent) {
     if (!ent) return null;
@@ -118,6 +131,13 @@
   function getSelectedMode(stateParams) {
     const m = stateParams.selectedDeviceMode || stateParams.mode;
     return m === 'ALL' ? 'ALL' : 'SINGLE';
+  }
+
+  function getSingleIdFromStateOrCtx(stateParams) {
+    const direct = stateParams.selectedDeviceId || stateParams.id || (stateParams.entityId && stateParams.entityId.id);
+    if (direct) return String(direct);
+    const idsFromCtx = getDeviceIdsFromCtxDatasources();
+    return idsFromCtx.length ? String(idsFromCtx[0]) : '';
   }
 
   function getAllDeviceIdsFromState(stateParams) {
@@ -321,60 +341,35 @@
     return per.reduce((a, b) => a + b, 0);
   }
 
-  async function computeVerified(deviceIds, keyName, startTs, endTs, signal) {
-    const results = [];
-    for (let i = 0; i < VERIFY_RUNS; i++) {
-      results.push(Number(await computeAllDevices(deviceIds, keyName, startTs, endTs, signal)));
-    }
-    const EPS = 1e-6;
-    const eq = (a, b) => Math.abs(a - b) <= EPS;
-
-    const a = results[0], b = results[1], c = results[2];
-    let ok = false, value = c;
-
-    if (eq(a, b) && eq(b, c)) { ok = true; value = a; }
-    else if (eq(a, b)) { ok = true; value = a; }
-    else if (eq(a, c)) { ok = true; value = a; }
-    else if (eq(b, c)) { ok = true; value = b; }
-
-    return { ok, value, results };
+  // ========= Signature + polling =========
+  function normalizeIds(ids) {
+    return dedupe(ids).sort().join(',');
   }
 
-  // ========= Signature + polling =========
   function buildSignature() {
     const st = readStateParams();
     const mode = getSelectedMode(st);
-    const idsCtx = getDeviceIdsFromCtxDatasources().join(',');
-    const idsState = getAllDeviceIdsFromState(st).join(',');
+    const idsCtx = normalizeIds(getDeviceIdsFromCtxDatasources());
+    const idsState = normalizeIds(getAllDeviceIdsFromState(st));
     const tw = getTimeWindow();
     const key = getConfiguredKeyName();
+    const singleId = getSingleIdFromStateOrCtx(st);
+    if (mode === 'ALL') {
+      return [
+        'mode=ALL',
+        'ids=' + (idsState || idsCtx),
+        'tw=' + String(tw.startTs) + '-' + String(tw.endTs),
+        'key=' + key,
+        'agg=' + AGG_MODE
+      ].join('|');
+    }
     return [
-      'mode=' + mode,
-      'ctx=' + idsCtx,
-      'state=' + idsState,
+      'mode=SINGLE',
+      'id=' + String(singleId || ''),
       'tw=' + String(tw.startTs) + '-' + String(tw.endTs),
       'key=' + key,
       'agg=' + AGG_MODE
     ].join('|');
-  }
-
-  function startPolling() {
-    if (pollTimer) return;
-    lastSig = buildSignature();
-    pollTimer = setInterval(() => {
-      try {
-        const sig = buildSignature();
-        if (sig !== lastSig) {
-          lastSig = sig;
-          scheduleRefresh('polling');
-        }
-      } catch (e) { }
-    }, POLL_INTERVAL_MS);
-  }
-
-  function stopPolling() {
-    try { if (pollTimer) clearInterval(pollTimer); } catch (e) { }
-    pollTimer = null;
   }
 
   // ========= Lifecycle =========
@@ -386,11 +381,18 @@
       let stateDebounce = null;
       self.stateSubscription = self.ctx.stateController.stateChanged().subscribe(function () {
         if (stateDebounce) clearTimeout(stateDebounce);
-        stateDebounce = setTimeout(() => scheduleRefresh('stateChanged'), 120);
+        stateDebounce = setTimeout(() => {
+          try {
+            if (self.ctx && self.ctx.updateAliases) self.ctx.updateAliases();
+            if (self.ctx && self.ctx.aliasController && self.ctx.aliasController.updateAliases) {
+              self.ctx.aliasController.updateAliases();
+            }
+          } catch (e) { }
+          scheduleRefresh('stateChanged');
+        }, 120);
       });
     }
 
-    startPolling();
     scheduleRefresh('init');
   };
 
@@ -412,14 +414,13 @@
   }
 
   function onDataUpdatedInternal() {
-    showOverlay();
+    if (isFetching) { needsRerun = true; return; }
+    showOverlayDelayed();
 
     fetchSeq++;
 
     try { if (activeAbort) activeAbort.abort(); } catch (e) { }
     activeAbort = null;
-
-    if (isFetching) { needsRerun = true; return; }
 
     if (pendingUpdateTimeout) clearTimeout(pendingUpdateTimeout);
     const scheduledSeq = fetchSeq;
@@ -433,7 +434,6 @@
   self.onEditModeChanged = function () { self.ctx.$scope.aggregatedValueCardWidget.onEditModeChanged(); };
 
   self.onDestroy = function () {
-    stopPolling();
     if (refreshTimer) {
       clearTimeout(refreshTimer);
       refreshTimer = null;
@@ -453,6 +453,10 @@
     } catch (e) { }
     overlayEl = null;
     overlayStyleEl = null;
+    if (overlayTimer) {
+      clearTimeout(overlayTimer);
+      overlayTimer = null;
+    }
 
     self.ctx.$scope.aggregatedValueCardWidget.onDestroy();
   };
@@ -463,11 +467,58 @@
     const stateParams = readStateParams();
     const mode = getSelectedMode(stateParams);
     const isAllMode = (mode === 'ALL');
+    const singleId = getSingleIdFromStateOrCtx(stateParams);
+
+    if (lastModeApplied !== mode || (mode === 'SINGLE' && singleId && singleId !== lastSingleIdApplied)) {
+      // Clear backup when switching device/mode to avoid stale data
+      originalSubBackup = null;
+    }
+    lastModeApplied = mode;
+    if (mode === 'SINGLE' && singleId) lastSingleIdApplied = singleId;
+
+    const { startTs, endTs } = getTimeWindow();
+    if (!startTs || !endTs) {
+      hideOverlay();
+      return;
+    }
 
     if (!isAllMode) {
-      restoreSubscriptionBackup();
-      hideOverlay();
-      renderCard();
+      if (!singleId || singleId === '__ALL__') {
+        hideOverlay();
+        renderCard();
+        return;
+      }
+
+      if (isFetching) { needsRerun = true; return; }
+      isFetching = true;
+      needsRerun = false;
+
+      const controller = new AbortController();
+      activeAbort = controller;
+
+      try {
+        const keyName = getConfiguredKeyName();
+        const value = await computeDeviceValue(singleId, keyName, startTs, endTs, controller.signal);
+
+        if (controller.signal.aborted) return;
+        if (mySeq !== fetchSeq) return;
+
+        injectAggregatedValueToSubscription(value);
+        renderCard();
+        hideOverlay();
+      } catch (e) {
+        if (String(e && e.name) !== 'AbortError') console.error('[card] error:', e);
+        hideOverlay();
+      } finally {
+        if (activeAbort === controller) activeAbort = null;
+        isFetching = false;
+
+        if (needsRerun) {
+          needsRerun = false;
+          const latest = fetchSeq;
+          setTimeout(() => processUpdate(latest), 0);
+        }
+      }
       return;
     }
 
@@ -476,12 +527,6 @@
       restoreSubscriptionBackup();
       hideOverlay();
       renderCard();
-      return;
-    }
-
-    const { startTs, endTs } = getTimeWindow();
-    if (!startTs || !endTs) {
-      setTimeout(() => { if (mySeq === fetchSeq) self.onDataUpdated && self.onDataUpdated(); }, 120);
       return;
     }
 
@@ -496,7 +541,7 @@
       backupSubscriptionIfNeeded();
 
       const keyName = getConfiguredKeyName();
-      const { ok, value } = await computeVerified(ids, keyName, startTs, endTs, controller.signal);
+      const value = await computeAllDevices(ids, keyName, startTs, endTs, controller.signal);
 
       if (controller.signal.aborted) return;
       if (mySeq !== fetchSeq) return;
@@ -504,25 +549,20 @@
       // ✅ Guard: ngữ cảnh đã đổi => không inject
       if (buildSignature() !== lastSig) return;
 
-      if (ok) {
-        injectAggregatedValueToSubscription(value);
-        renderCard();
-        hideOverlay();
-      } else {
-        setTimeout(() => {
-          if (mySeq === fetchSeq) self.onDataUpdated && self.onDataUpdated();
-        }, RETRY_DELAY_MS);
-      }
+      injectAggregatedValueToSubscription(value);
+      renderCard();
+      hideOverlay();
     } catch (e) {
       if (String(e && e.name) !== 'AbortError') console.error('[card] error:', e);
     } finally {
       if (activeAbort === controller) activeAbort = null;
       isFetching = false;
-
       if (needsRerun) {
         needsRerun = false;
         const latest = fetchSeq;
         setTimeout(() => processUpdate(latest), 0);
+      } else {
+        hideOverlay();
       }
     }
   }
