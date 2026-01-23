@@ -1,23 +1,45 @@
 self.onInit = function () {
-    self.typeSelect = document.getElementById('typeSelect');
-    self.deviceSelect = document.getElementById('deviceSelect');
-    self.statusEl = document.getElementById('status');
+    self.rootEl = (self.ctx && self.ctx.$container && self.ctx.$container[0]) ? self.ctx.$container[0] : document;
+    self.typeSelect = self.rootEl.querySelector('#typeSelect');
+    self.deviceSelect = self.rootEl.querySelector('#deviceSelect');
+    self.storeDisplay = self.rootEl.querySelector('#storeDisplay');
+    self.deviceDisplay = self.rootEl.querySelector('#deviceDisplay');
+    self.statusEl = self.rootEl.querySelector('#status');
     self.lastSelection = restoreSelection();
     self.devicesByType = {};
     self.isLoadingOptions = false;
     self.persistTimer = null;
     self.suppressAutoPersist = false;
 
+    self.updateLabels = function () {
+        // Update Store Label
+        if (self.typeSelect.options.length > 0 && self.typeSelect.selectedIndex >= 0) {
+            self.storeDisplay.textContent = self.typeSelect.options[self.typeSelect.selectedIndex].text;
+        } else {
+            self.storeDisplay.textContent = 'Select Store';
+        }
+
+        // Update Device Label
+        if (self.deviceSelect.options.length > 0 && self.deviceSelect.selectedIndex >= 0) {
+            self.deviceDisplay.textContent = self.deviceSelect.options[self.deviceSelect.selectedIndex].text;
+        } else {
+            self.deviceDisplay.textContent = 'Select Device';
+        }
+    };
+
     self.typeChangeHandler = async () => {
+        self.updateLabels();
         const type = self.typeSelect.value;
         const saved = restoreSelection();
         const preferred = saved && saved.deviceType === type ? saved.deviceId : null;
         await loadDevicesByType(type, preferred);
+        self.updateLabels();
         persistSelection();
     };
     self.typeSelect.addEventListener('change', self.typeChangeHandler);
 
     self.deviceChangeHandler = () => {
+        self.updateLabels();
         persistSelection();
     };
     self.deviceSelect.addEventListener('change', self.deviceChangeHandler);
@@ -34,6 +56,7 @@ self.onInit = function () {
     }
 
     init();
+    wireCustomDropdowns();
 };
 
 self.onDestroy = function () {
@@ -58,6 +81,8 @@ self.onDestroy = function () {
         clearTimeout(self.persistTimer);
         self.persistTimer = null;
     }
+    teardownCustomDropdowns();
+    try { ensureStoreDropdownManager().close(); } catch (e) { }
 };
 
 async function init() {
@@ -85,6 +110,7 @@ async function init() {
             if (savedSelection && savedSelection.deviceType && types.includes(savedSelection.deviceType)) {
                 // //console.log('[store_type] 📦 Restoring saved selection:', savedSelection);
                 self.typeSelect.value = savedSelection.deviceType;
+                self.updateLabels();
                 self.suppressAutoPersist = true;
                 await loadDevicesByType(savedSelection.deviceType, savedSelection.deviceId);
                 self.suppressAutoPersist = false;
@@ -94,11 +120,13 @@ async function init() {
                     await forceAllThenDevice(savedSelection.deviceType, savedSelection.deviceId);
                 } else {
                     self.deviceSelect.value = savedSelection.deviceId || '__ALL__';
+                    self.updateLabels();
                     persistSelection();
                 }
             } else if (types.length) {
                 // Fallback: auto-load devices for first type
                 self.typeSelect.value = types[0];
+                self.updateLabels();
                 self.suppressAutoPersist = true;
                 await loadDevicesByType(types[0], null);
                 self.suppressAutoPersist = false;
@@ -107,6 +135,7 @@ async function init() {
             } else {
                 // //console.warn('[store_type] No device types found');
                 setStatus('No device types available');
+                self.updateLabels();
             }
         }
     } catch (error) {
@@ -120,6 +149,7 @@ async function forceAllThenDevice(type, deviceId) {
     // Warm-up with ALL internally (no state update to avoid chart flicker)
     if (self.deviceSelect.querySelector('option[value="__ALL__"]')) {
         self.deviceSelect.value = '__ALL__';
+        self.updateLabels();
         self.isLoadingOptions = false;
         persistSelection({ silentState: true, skipStorage: true });
     }
@@ -129,6 +159,7 @@ async function forceAllThenDevice(type, deviceId) {
         const optionExists = Array.from(self.deviceSelect.options).some(opt => opt.value === deviceId);
         if (optionExists) {
             self.deviceSelect.value = deviceId;
+            self.updateLabels();
             self.isLoadingOptions = false;
             persistSelection();
         }
@@ -152,6 +183,7 @@ async function updateUiFromState(params) {
         // 1. Sync Type
         if (self.typeSelect.value !== type) {
             self.typeSelect.value = type;
+            self.updateLabels();
             self.suppressAutoPersist = true;
             await loadDevicesByType(type, deviceId);
             self.suppressAutoPersist = false;
@@ -170,11 +202,13 @@ async function updateUiFromState(params) {
             const optionExists = Array.from(self.deviceSelect.options).some(opt => opt.value === deviceId);
             if (optionExists) {
                 self.deviceSelect.value = deviceId;
+                self.updateLabels();
             } else if (deviceId === '__ALL__') {
                 // Ensure __ALL__ option exists if it was expected but maybe not loaded yet? 
                 // (loadDevicesByType should have handled it if multiple devices exist)
                 if (self.deviceSelect.querySelector('option[value="__ALL__"]')) {
                     self.deviceSelect.value = '__ALL__';
+                    self.updateLabels();
                 }
             }
         }
@@ -201,6 +235,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
     if (!type) {
         // No type selected - clear and return
         fillSelect(self.deviceSelect, [], null);
+        self.updateLabels();
         return;
     }
     setStatus('Loading devices...');
@@ -248,6 +283,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
             if (exists) defaultSelection = preferredDeviceId;
         }
         self.deviceSelect.value = defaultSelection;
+        self.updateLabels();
         self.isLoadingOptions = false;
         if (!self.suppressAutoPersist && !self.isUpdatingFromState) {
             persistSelection();
@@ -267,10 +303,11 @@ async function loadDevicesByType(type, preferredDeviceId) {
             fillSelect(self.deviceSelect, deviceOptions, null);
             const preferred = preferredDeviceId || (self.lastSelection && self.lastSelection.deviceType === type ? self.lastSelection.deviceId : null);
             if (preferred && deviceOptions.some(opt => opt.value === preferred)) {
-            self.deviceSelect.value = preferred;
+                self.deviceSelect.value = preferred;
             } else if (deviceOptions.length) {
                 self.deviceSelect.value = deviceOptions[0].value;
             }
+            self.updateLabels(); // Call updatedLabels after value setting
             setStatus('');
             self.isLoadingOptions = false;
             if (!self.suppressAutoPersist && !self.isUpdatingFromState) {
@@ -282,6 +319,164 @@ async function loadDevicesByType(type, preferredDeviceId) {
         setStatus('Error loading devices: ' + error.message);
     } finally {
         setTimeout(() => { self.isLoadingOptions = false; }, 0);
+    }
+}
+
+// -------- Native dropdown open helper --------
+function ensureStoreDropdownManager() {
+    var topWin = window.top || window;
+    if (topWin.__TB_STORE_DD__) return topWin.__TB_STORE_DD__;
+
+    function ensureStyles() {
+        var topDoc = topWin.document;
+        var style = topDoc.getElementById('tb-store-dd-styles');
+        var css =
+            '.tb-store-dd-overlay{position:fixed;inset:0;background:transparent;z-index:2147483647;}' +
+            '.tb-store-dd{position:fixed;background:#fff;border-radius:6px;padding:8px;min-width:220px;' +
+            'box-shadow:0 10px 24px rgba(0,0,0,.2);box-sizing:border-box;z-index:2147483648;}' +
+            '.tb-store-dd-list{display:block;max-height:240px;overflow:auto;padding-right:4px;}' +
+            '.tb-store-dd-item{border:1px solid transparent;border-radius:4px;padding:8px 10px;text-align:left;' +
+            'font-size:12px;font-weight:500;color:#333;cursor:pointer;background:#fff;transition:all .2s ease;width:100%;}' +
+            '.tb-store-dd-item:hover{background:rgba(48,86,128,.08);color:#305680;}' +
+            '.tb-store-dd-item.active{background:var(--dd-active-bg, rgba(237,28,36,.1));' +
+            'color:var(--dd-active-color, #ED1C24);' +
+            'border-color:var(--dd-active-border, rgba(237,28,36,.3));}';
+        if (!style) {
+            style = topDoc.createElement('style');
+            style.id = 'tb-store-dd-styles';
+            style.textContent = css;
+            topDoc.head.appendChild(style);
+        } else {
+            style.textContent = css;
+        }
+    }
+
+    var mgr = {
+        overlay: null,
+        dropdown: null,
+        _listeners: [],
+        open: function (selectEl, anchorEl, theme) {
+            this.close();
+            if (!selectEl || !anchorEl) return;
+            ensureStyles();
+            var topDoc = topWin.document;
+            var overlay = topDoc.createElement('div');
+            overlay.className = 'tb-store-dd-overlay';
+            topDoc.body.appendChild(overlay);
+            this.overlay = overlay;
+
+            var dropdown = topDoc.createElement('div');
+            dropdown.className = 'tb-store-dd';
+            if (theme === 'blue') {
+                dropdown.style.setProperty('--dd-active-bg', 'rgba(59,130,246,.12)');
+                dropdown.style.setProperty('--dd-active-color', '#3B82F6');
+                dropdown.style.setProperty('--dd-active-border', 'rgba(59,130,246,.35)');
+            } else {
+                dropdown.style.setProperty('--dd-active-bg', 'rgba(237,28,36,.1)');
+                dropdown.style.setProperty('--dd-active-color', '#ED1C24');
+                dropdown.style.setProperty('--dd-active-border', 'rgba(237,28,36,.3)');
+            }
+            dropdown.innerHTML = '<div class="tb-store-dd-list"></div>';
+            topDoc.body.appendChild(dropdown);
+            this.dropdown = dropdown;
+
+            var list = dropdown.querySelector('.tb-store-dd-list');
+            var options = Array.from(selectEl.options || []);
+            options.forEach(function (opt) {
+                if (!opt || (opt.value === '' && !opt.textContent)) return;
+                var btn = topDoc.createElement('button');
+                btn.type = 'button';
+                btn.className = 'tb-store-dd-item' + (opt.value === selectEl.value ? ' active' : '');
+                btn.textContent = opt.textContent;
+                btn.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    if (selectEl.value !== opt.value) {
+                        selectEl.value = opt.value;
+                        selectEl.dispatchEvent(new Event('change'));
+                    }
+                    mgr.close();
+                });
+                list.appendChild(btn);
+            });
+
+            this.position(anchorEl);
+
+            var selfMgr = this;
+            var onEsc = function (e) { if (e.key === 'Escape') selfMgr.close(); };
+            var onOutside = function (e) { if (e.target === overlay) selfMgr.close(); };
+            var onResize = function () { selfMgr.close(); };
+            (window.top || window).addEventListener('keydown', onEsc, true);
+            (window.top || window).addEventListener('resize', onResize);
+            overlay.addEventListener('click', onOutside);
+            this._listeners = [
+                [window.top || window, 'keydown', onEsc, true],
+                [window.top || window, 'resize', onResize, false],
+                [overlay, 'click', onOutside, false]
+            ];
+        },
+        position: function (anchorEl) {
+            if (!this.dropdown || !anchorEl) return;
+            var a = anchorEl.getBoundingClientRect();
+            var fe = window.frameElement;
+            var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
+            var gap = 6;
+            var left = f.left + a.left;
+            var top = f.top + a.bottom + gap;
+            var vw = (window.top || window).innerWidth;
+            var vh = (window.top || window).innerHeight;
+            var dd = this.dropdown;
+            var ddW = dd.offsetWidth || 240;
+            var ddH = dd.offsetHeight || 200;
+            if (left + ddW + gap > vw) left = Math.max(gap, vw - ddW - gap);
+            if (top + ddH + gap > vh) top = Math.max(gap, f.top + a.top - ddH - gap);
+            dd.style.left = Math.max(gap, left) + 'px';
+            dd.style.top = Math.max(gap, top) + 'px';
+            dd.style.width = Math.max(160, a.width) + 'px';
+        },
+        close: function () {
+            if (!this.overlay) return;
+            try {
+                if (this._listeners && this._listeners.forEach) {
+                    this._listeners.forEach(function (arr) {
+                        try { arr[0].removeEventListener(arr[1], arr[2], arr[3]); } catch (e) { }
+                    });
+                }
+            } catch (e) { }
+            try { this.overlay.remove(); } catch (e) { }
+            try { if (this.dropdown) this.dropdown.remove(); } catch (e) { }
+            this.overlay = null;
+            this.dropdown = null;
+            this._listeners = [];
+        }
+    };
+
+    topWin.__TB_STORE_DD__ = mgr;
+    return mgr;
+}
+
+function wireCustomDropdowns() {
+    if (!self.rootEl || self._dropdownHandler) return;
+    var mgr = ensureStoreDropdownManager();
+    self._dropdownHandler = function (e) {
+        var storeCard = e.target.closest('.store-card');
+        var deviceCard = e.target.closest('.device-card');
+        if (storeCard && self.typeSelect) {
+            e.stopPropagation();
+            mgr.open(self.typeSelect, storeCard, 'red');
+            return;
+        }
+        if (deviceCard && self.deviceSelect) {
+            e.stopPropagation();
+            mgr.open(self.deviceSelect, deviceCard, 'blue');
+        }
+    };
+    self.rootEl.addEventListener('click', self._dropdownHandler);
+}
+
+function teardownCustomDropdowns() {
+    if (self.rootEl && self._dropdownHandler) {
+        self.rootEl.removeEventListener('click', self._dropdownHandler);
+        self._dropdownHandler = null;
     }
 }
 
@@ -307,6 +502,7 @@ function fillSelect(selectEl, items, placeholder) {
         }
         selectEl.appendChild(opt);
     });
+    // native select: no custom menu build
 }
 
 function setStatus(msg) {

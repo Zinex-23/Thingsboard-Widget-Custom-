@@ -1,167 +1,144 @@
 /* ===== Container ===== */
 .store-selector-widget {
-  width: 100%;
-  height: 100%;
-  padding: 12px;
-  background: #fff;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  font-size: clamp(11px, min(2vw, 3vh), 15px);
-  color: #111827;
-}
-
-/* ===== Row ===== */
-.selector-row {
-  display: flex;
-  gap: 12px;
-  width: 100%;
-  align-items: flex-start;
-}
-
-/* ===== Fields ===== */
-.form-field {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.store-field {
-  flex: 3;
-}
-
-.device-field {
-  flex: 7;
-}
-
-/* ===== Label (có thanh đỏ) ===== */
-.field-label {
-  display: flex;
-  align-items: center;
-  font-size: 0.75em;
-  font-weight: 700;
-  color: #111827;
-  margin-bottom: 6px;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.field-label::before {
-  content: '';
-  display: inline-block;
-  width: 3px;
-  height: 14px;
-  background: linear-gradient(180deg, #ED1C24 0%, #c91820 100%);
-  border-radius: 2px;
-  margin-right: 8px;
-  flex-shrink: 0;
-}
-
-/* ===== Select wrapper: border đỏ khi focus ===== */
-.select-wrapper {
-  position: relative;
-  width: 100%;
-  min-height: 36px;
-  max-height: 48px;
-  background: #ffffff;
-  border: 2px solid #E5E7EB;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  transition: border-color 0.2s ease;
-}
-
-/* Hover */
-.select-wrapper:hover {
-  border-color: #D1D5DB;
-}
-
-/* Focus - viền đỏ */
-.select-wrapper:focus-within {
-  border-color: #ED1C24;
-}
-
-/* Select */
-.mat-select {
-  width: 100%;
-  height: 100%;
-  padding: 0 34px 0 12px;
-  font-size: 1em;
-  font-weight: 600;
-  color: #111827;
-  background: transparent;
-  border: none;
-  outline: none;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  line-height: 1.5;
-}
-
-/* Mũi tên đỏ */
-.select-wrapper::after {
-  content: '';
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 16px;
-  height: 16px;
-  background: linear-gradient(135deg, #ED1C24 0%, #c91820 100%);
-  mask-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  mask-repeat: no-repeat;
-  mask-position: center;
-  mask-size: contain;
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M5 7.5L10 12.5L15 7.5' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  -webkit-mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  -webkit-mask-size: contain;
-  pointer-events: none;
-  opacity: 0.9;
-}
-
-/* Options */
-.mat-select option {
-  color: #111827;
-  background: #fff;
-}
-
-/* Disabled */
-.mat-select:disabled {
-  color: #9CA3AF;
-  cursor: not-allowed;
-  opacity: 0.7;
-}
-
-/* Status */
-.status-container {
-  margin-top: 8px;
-  display: none;
-}
-
-.status-container:not(:empty) {
-  display: block;
-}
-
-.status-text {
-  font-size: 0.8em;
-  color: #6B7280;
-  font-weight: 500;
-}
-
-/* Responsive */
-@media (max-width: 350px) {
-  .selector-row {
-    flex-direction: column;
-    gap: 8px;
-  }
-  .store-field, .device-field {
-    flex: auto;
     width: 100%;
-  }
+    height: 100%;
+    padding: 12px;
+    background: transparent;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    font-size: 14px;
+    color: #111827;
+}
+
+/* ===== Cards Container ===== */
+.cards-container {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+    align-items: center;
+}
+
+/* ===== Card ===== */
+.custom-select-card {
+    position: relative;
+    background: #ffffff;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    min-width: 0;
+    --select-pad-left: 68px;
+    --select-pad-right: 44px;
+}
+
+.store-card { flex: 4; }
+.device-card { flex: 6; }
+
+.custom-select-card:hover {
+    border-color: #D1D5DB;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* ===== Icon Wrapper ===== */
+.card-icon-wrapper {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.store-icon-bg { background-color: #FEF2F2; }
+.device-icon-bg { background-color: #EFF6FF; }
+
+/* ===== Content ===== */
+.card-content {
+    display: flex;
+    flex-direction: column;
+    margin-left: 12px;
+    flex-grow: 1;
+    overflow: hidden;
+    margin-right: 8px;
+}
+.card-label {
+    font-size: 11px;
+    color: #6B7280;
+    margin-bottom: 2px;
+    text-transform: none;
+    font-weight: 500;
+}
+.card-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+/* ===== Arrow ===== */
+.card-arrow {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.device-card .card-arrow path {
+    stroke: #3B82F6;
+}
+
+/* ===== Hidden Select (native) ===== */
+.hidden-select {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    z-index: 10;
+    pointer-events: none;
+    border-radius: 12px;
+    padding-left: var(--select-pad-left);
+    padding-right: var(--select-pad-right);
+}
+.hidden-select option {
+    color: #111827;
+    background: #fff;
+}
+
+/* ===== Status ===== */
+.status-container {
+    margin-top: 8px;
+    display: none;
+}
+.status-container:not(:empty) { display: block; }
+.status-text {
+    font-size: 0.8em;
+    color: #6B7280;
+    font-weight: 500;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 500px) {
+    .cards-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .store-card,
+    .device-card {
+        flex: auto;
+        width: 100%;
+    }
 }
