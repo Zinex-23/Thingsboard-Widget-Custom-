@@ -3,9 +3,9 @@
 git-status:
 	@git status
 
-git-quick:
+git-push:
 	@set -e; \
-	BRANCH="$${BRANCH:-$$(git rev-parse --abbrev-ref HEAD)}"; \
+	BRANCH="$${BRANCH:-updated-timewindow}"; \
 	MSG="$${COMMIT_MSG:-updated}"; \
 	git status; \
 	git add .; \
