@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Calendar Widget Preview</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            font-family: 'Inter', 'SF Pro Display', -apple-system, 'Segoe UI', sans-serif;
+        }
+
+        .preview-container {
+            max-width: 100%;
+            margin: 0;
+            background: transparent;
+            padding: 0;
+            border-radius: 0;
+            box-shadow: none;
+        }
+
+        h1 {
+            margin: 0 0 20px 0;
+            color: #1e293b;
+            font-size: 24px;
+        }
+
+        .widget-wrapper {
+            width: 100%;
+            height: 800px;
+            border: none;
+            border-radius: 0;
+            overflow: hidden;
+        }
+    </style>
+    <link rel="stylesheet" href="calender.css" />
+</head>
+
+<body>
+    <div class="preview-container">
+
+
+        <div class="widget-wrapper">
+            <!-- Root container -->
+            <div id="cal-root" class="tb-cal">
+                <div class="tb-cal__header">
+                    <div class="tb-title-group">
+                        <button class="tb-cal__btn" data-nav="-1" title="Previous Month">‹</button>
+                        <div class="tb-cal__title"></div>
+                        <button class="tb-cal__btn" data-nav="1" title="Next Month">›</button>
+                    </div>
+                </div>
+
+                <div class="tb-cal__compare-row"></div>
+
+                <div class="tb-cal__toolbar">
+                    <!-- Customer -->
+                    <div class="tb-key-wrap tb-field">
+                        <span>Customer:</span>
+                        <select id="tb-key-select" class="tb-select">
+                            <option value="totalVisits">Total Visits</option>
+                            <option value="revenue">Revenue</option>
+                            <option value="orders">Orders</option>
+                        </select>
+                    </div>
+
+                    <!-- Compare -->
+                    <div class="tb-compare-wrap tb-field" style="margin-left:16px;">
+                        <span>Compare:</span>
+                        <select id="tb-compare-select" class="tb-select">
+                            <option value="prevDay">Last day</option>
+                            <option value="prevWeek" selected>Last week</option>
+                            <option value="prevMonth">Last month</option>
+                            <option value="prevYear">Last year</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="tb-cal__weekdays"></div>
+                <div class="tb-cal__grid" id="tb-cal-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Simplified preview script with sample data
+        'use strict';
+
+        var DEFAULTS = {
+            decimals: 0,
+            hideZero: true,
+            deltaEnabled: true,
+            deltaDecimals: 1,
+            deltaUpColor: '#16a34a',
+            deltaDownColor: '#dc2626',
+            deltaZeroColor: '#94a3b8',
+            showTodayDot: true,
+            locale: 'en-US',
+            weekdayNames: ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'],
+            compareMode: 'prevWeek'
+        };
+        var S = DEFAULTS;
+
+        var viewYear, viewMonth;
+        var dayAggMap = new Map();
+
+        function startOfDay(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+        function fmtNumber(n) { return new Intl.NumberFormat(S.locale, { maximumFractionDigits: S.decimals }).format(n || 0); }
+        function fmtPercent(x) { return Math.abs(x).toFixed(S.deltaDecimals) + '%'; }
+
+        // Generate sample data for current month
+        function generateSampleData() {
+            var map = new Map();
+            var now = new Date();
+            var year = now.getFullYear();
+            var month = now.getMonth();
+
+            // Generate data for current month
+            for (var d = 1; d <= 31; d++) {
+                var date = new Date(year, month, d);
+                if (date.getMonth() !== month) break;
+
+                var key = startOfDay(date).getTime();
+                var value = Math.floor(Math.random() * 900) + 100; // Random 100-1000
+                map.set(key, value);
+            }
+
+            // Generate data for previous month for comparison
+            for (var d = 1; d <= 31; d++) {
+                var date = new Date(year, month - 1, d);
+                if (date.getMonth() !== (month - 1 + 12) % 12) break;
+
+                var key = startOfDay(date).getTime();
+                var value = Math.floor(Math.random() * 900) + 100;
+                map.set(key, value);
+            }
+
+            return map;
+        }
+
+        function setTitle(y, m) {
+            var titleEl = document.querySelector('.tb-cal__title');
+            if (!titleEl) return;
+            var monthStr = new Date(y, m, 1).toLocaleDateString(S.locale, { month: 'long' });
+            titleEl.innerHTML =
+                '<div class="tb-title-month">' + monthStr + '</div>' +
+                '<div class="tb-title-year">' + y + '</div>';
+        }
+
+        function renderWeekdays() {
+            var wrap = document.querySelector('.tb-cal__weekdays');
+            if (!wrap) return;
+            var names = S.weekdayNames;
+            wrap.innerHTML = names.map(function (d) { return '<div>' + d + '</div>'; }).join('');
+        }
+
+        function sameWeekdayPrevWeek(d) {
+            var x = new Date(d);
+            x.setDate(x.getDate() - 7);
+            return x;
+        }
+
+        function renderGrid() {
+            var grid = document.querySelector('#tb-cal-grid');
+            if (!grid) return;
+
+            setTitle(viewYear, viewMonth);
+            grid.innerHTML = '';
+
+            var first = new Date(viewYear, viewMonth, 1);
+            var startWeekIdx = (first.getDay() + 6) % 7;
+            var start = new Date(viewYear, viewMonth, 1 - startWeekIdx);
+            var today = startOfDay(new Date()).getTime();
+
+            for (var i = 0; i < 42; i++) {
+                var d = new Date(start); d.setDate(start.getDate() + i);
+                var dMs = startOfDay(d).getTime();
+                var inMonth = (d.getMonth() === viewMonth);
+                var isToday = (dMs === today);
+
+                var prevDate = sameWeekdayPrevWeek(d);
+                var prevMs = startOfDay(prevDate).getTime();
+
+                var hasVal = dayAggMap.has(dMs);
+                var hasPrev = dayAggMap.has(prevMs);
+                var val = hasVal ? (dayAggMap.get(dMs) || 0) : 0;
+                var prevVal = hasPrev ? (dayAggMap.get(prevMs) || 0) : 0;
+
+                if (!inMonth) { hasVal = false; val = 0; hasPrev = false; prevVal = 0; }
+
+                var showDelta = false, pctDay = 0, deltaAttr = '';
+                if (inMonth && S.deltaEnabled && hasVal && hasPrev && prevVal) {
+                    pctDay = ((val - prevVal) / prevVal) * 100; showDelta = true;
+                    deltaAttr = pctDay > 0 ? 'up' : (pctDay < 0 ? 'down' : '');
+                }
+
+                var cell = document.createElement('div');
+                cell.className = 'tb-cell' + (inMonth ? '' : ' other') + (isToday ? ' today' : '');
+                if (deltaAttr) cell.setAttribute('data-delta', deltaAttr);
+
+                var html = '<span class="num">' + d.getDate() + '</span>';
+                if (inMonth && hasVal && !(S.hideZero && val === 0)) {
+                    html += '<div class="val">' + fmtNumber(val) + '</div>';
+                }
+                cell.innerHTML = html;
+
+                if (inMonth && showDelta) {
+                    var chip = document.createElement('div'); chip.className = 'tb-delta';
+                    chip.style.color = (pctDay > 0) ? S.deltaUpColor : (pctDay < 0) ? S.deltaDownColor : S.deltaZeroColor;
+                    chip.innerHTML = (pctDay > 0 ? '↑' : (pctDay < 0 ? '↓' : '•')) + ' ' + fmtPercent(pctDay);
+                    cell.appendChild(chip);
+
+                    // Heatmap effect for delta
+                    if (pctDay !== 0) {
+                        var absPct = Math.min(Math.abs(pctDay), 100);
+                        var alpha = 0.04 + (absPct / 100) * 0.12;
+                        var color = pctDay > 0 ? '22,163,74' : '239,68,68';
+                        cell.style.backgroundColor = 'rgba(' + color + ', ' + alpha + ')';
+                    }
+                } else if (inMonth && hasVal && val !== 0) {
+                    // Heatmap effect for single value
+                    var signColor = val > 0 ? '22,163,74' : '239,68,68';
+                    var norm = 0.5; // dummy norm for preview since we don't calculate max
+                    var alpha2 = 0.04 + norm * 0.12;
+                    cell.style.backgroundColor = 'rgba(' + signColor + ', ' + alpha2 + ')';
+                }
+
+                grid.appendChild(cell);
+            }
+        }
+
+        function wireNav() {
+            document.querySelectorAll('.tb-cal__btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    var step = +btn.getAttribute('data-nav');
+                    var base = new Date(viewYear, viewMonth, 1);
+                    base.setMonth(base.getMonth() + step);
+                    viewYear = base.getFullYear(); viewMonth = base.getMonth();
+                    renderGrid();
+                });
+            });
+        }
+
+        // Initialize
+        function init() {
+            var now = new Date();
+            viewYear = now.getFullYear();
+            viewMonth = now.getMonth();
+
+            dayAggMap = generateSampleData();
+
+            renderWeekdays();
+            renderGrid();
+            wireNav();
+        }
+
+        // Run on load
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+
+</html>
