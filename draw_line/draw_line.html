@@ -1,0 +1,39 @@
+<div class="wrapper">
+    <div class="toolbar">
+        <div class="toolbar-row">
+            <div class="toolbar-left">
+                <button class="tb-btn btn-save" mat-button color="primary" (click)="savePolygon()">Save</button>
+                <button class="tb-btn btn-undo" mat-button (click)="undoPoint()">Undo</button>
+                <button class="tb-btn btn-clear" mat-button (click)="clearAll()">Clear</button>
+                <button class="tb-btn btn-reload" mat-button (click)="reloadSaved()">Reload</button>
+            </div>
+
+            <div class="toolbar-right">
+                <div class="cam-box">
+                    <label class="cam-label">Camera</label>
+                    <select class="cam-dd"></select>
+                </div>
+
+                <div class="roi-switch">
+                    <button class="roi-btn active" data-roi="Detect">Detect</button>
+                    <button class="roi-btn" data-roi="Region1">Region1</button>
+                    <button class="roi-btn" data-roi="Region2">Region2</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="stage">
+        <canvas></canvas>
+
+        <!-- Loading overlay -->
+        <div class="loading-overlay">
+            <div class="loading-card">
+                <div class="spinner"></div>
+                <div class="loading-text">Loading latest frame...</div>
+            </div>
+        </div>
+
+        <div class="toast-center"></div>
+    </div>
+</div>

@@ -11,8 +11,30 @@
       </div>
 
       <div class="eh-btn-group" id="eh2-hour-mode-group">
-        <button class="eh-btn eh-btn--chip active" data-hour-mode="10h">Business Hours</button>
-        <button class="eh-btn eh-btn--chip" data-hour-mode="24h">All Day</button>
+        <button class="eh-btn eh-btn--chip active" id="eh2-hour-toggle" data-hour-mode="10h">
+          <span class="eh-btn-text">Business Hours</span>
+          <svg class="eh-switch-icon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+            xmlns="http://www.w3.org/2000/svg">
+            <path d="M16 3L20 7L16 11M20 7H4M8 21L4 17L8 13M4 17H20" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
+      </div>
+
+      <!-- Key Selector -->
+      <!-- Key Selector (Custom Dropdown) -->
+      <div id="eh2-key-wrap" class="eh-key-wrap" style="display:none;">
+        <span class="eh-label">Type:</span>
+        <div class="eh-dropdown">
+          <button id="eh2-key-trigger" class="eh-dropdown-trigger">
+            <span id="eh2-key-label">Select</span>
+            <svg class="eh-arrow" width="10" height="6" viewBox="0 0 10 6" fill="none">
+              <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+                stroke-linejoin="round" />
+            </svg>
+          </button>
+          <div id="eh2-key-menu" class="eh-dropdown-menu"></div>
+        </div>
       </div>
     </div>
 
@@ -43,7 +65,15 @@
             <div class="title" id="eh2-titleL"></div>
             <button class="eh2-iconbtn" id="eh2-nextL" aria-label="Next month">›</button>
           </div>
-          <div class="eh2-week"><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div><div>Su</div></div>
+          <div class="eh2-week">
+            <div>Mo</div>
+            <div>Tu</div>
+            <div>We</div>
+            <div>Th</div>
+            <div>Fr</div>
+            <div>Sa</div>
+            <div>Su</div>
+          </div>
           <div class="eh2-grid" id="eh2-gridL"></div>
         </div>
 
@@ -54,7 +84,15 @@
             <div class="title" id="eh2-titleR"></div>
             <button class="eh2-iconbtn" id="eh2-nextR" aria-label="Next month">›</button>
           </div>
-          <div class="eh2-week"><div>Mo</div><div>Tu</div><div>We</div><div>Th</div><div>Fr</div><div>Sa</div><div>Su</div></div>
+          <div class="eh2-week">
+            <div>Mo</div>
+            <div>Tu</div>
+            <div>We</div>
+            <div>Th</div>
+            <div>Fr</div>
+            <div>Sa</div>
+            <div>Su</div>
+          </div>
           <div class="eh2-grid" id="eh2-gridR"></div>
         </div>
       </div>

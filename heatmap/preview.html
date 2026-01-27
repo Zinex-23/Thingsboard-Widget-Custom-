@@ -1,94 +1,109 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Heatmap Preview</title>
-    <link rel="stylesheet" href="./heatmap.css" />
-    <style>
-      body {
-        margin: 0;
-        background: #f8fafc;
-        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
-      }
-      .preview-wrap {
-        max-width: 1200px;
-        margin: 24px auto;
-        padding: 16px;
-      }
-      #eh2-root {
-        background: #ffffff;
-        border-radius: 14px;
-        box-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
-        padding: 16px;
-        height: 520px;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="preview-wrap">
-      <!-- include widget HTML -->
-      <div id="eh2-root" data-theme="light">
-        <div class="eh-card">
-          <div id="eh2-header" class="eh-header">
-            <div class="eh-btn-group" id="eh2-range-group">
-              <button class="eh-btn eh-btn--chip" data-range="1d">Last 24 Hours</button>
-              <button class="eh-btn eh-btn--chip active" data-range="1w">Last 7 Days</button>
-              <button class="eh-btn eh-btn--chip" data-range="1m">Last 30 Days</button>
-              <button class="eh-btn eh-btn--chip" data-range="custom">Custom</button>
-            </div>
-            <div class="eh-btn-group" id="eh2-hour-mode-group">
-              <button class="eh-btn eh-btn--chip active" data-hour-mode="10h">Business Hours</button>
-              <button class="eh-btn eh-btn--chip" data-hour-mode="24h">All Day</button>
-            </div>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Heatmap Preview</title>
+  <link rel="stylesheet" href="./heatmap.css" />
+  <style>
+    body {
+      margin: 0;
+      background: #f8fafc;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+    }
+
+    .preview-wrap {
+      max-width: 1200px;
+      margin: 24px auto;
+      padding: 16px;
+    }
+
+    #eh2-root {
+      background: #ffffff;
+      border-radius: 14px;
+      box-shadow: 0 14px 38px rgba(15, 23, 42, 0.08);
+      padding: 16px;
+      height: 520px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="preview-wrap">
+    <!-- include widget HTML -->
+    <div id="eh2-root" data-theme="light">
+      <div class="eh-card">
+        <div id="eh2-header" class="eh-header">
+          <div class="eh-btn-group" id="eh2-range-group">
+            <button class="eh-btn eh-btn--chip" data-range="1d">Last 24 Hours</button>
+            <button class="eh-btn eh-btn--chip active" data-range="1w">Last 7 Days</button>
+            <button class="eh-btn eh-btn--chip" data-range="1m">Last 30 Days</button>
+            <button class="eh-btn eh-btn--chip" data-range="custom">Custom</button>
           </div>
-          <div class="eh-scroll-wrap">
-            <canvas id="eh2-canvas" class="eh-canvas" aria-label="Energy heatmap"></canvas>
+          <div class="eh-btn-group" id="eh2-hour-mode-group">
+            <button class="eh-btn eh-btn--chip active" data-hour-mode="10h">Business Hours</button>
+            <button class="eh-btn eh-btn--chip" data-hour-mode="24h">All Day</button>
           </div>
-          <div id="eh2-legend" class="eh-legend"></div>
-          <div id="eh2-tooltip" class="eh-tooltip" style="display:none"></div>
         </div>
+        <div class="eh-scroll-wrap">
+          <canvas id="eh2-canvas" class="eh-canvas" aria-label="Energy heatmap"></canvas>
+        </div>
+        <div id="eh2-legend" class="eh-legend"></div>
+        <div id="eh2-tooltip" class="eh-tooltip" style="display:none"></div>
       </div>
     </div>
+  </div>
 
-    <script>
-      // Mock data generator for preview
-      (function () {
-        function startOfDay(d) { var x = new Date(d); x.setHours(0,0,0,0); return x; }
-        function rand(seed) { return Math.sin(seed) * 10000 - Math.floor(Math.sin(seed) * 10000); }
+  <script>
+    // Mock data generator for preview
+    (function () {
+      function startOfDay(d) { var x = new Date(d); x.setHours(0, 0, 0, 0); return x; }
+      function rand(seed) { return Math.sin(seed) * 10000 - Math.floor(Math.sin(seed) * 10000); }
 
-        var now = new Date();
-        var start = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
-        var end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      var now = new Date();
+      var start = startOfDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6));
+      var end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
 
-        function makeSeries(mult, noise) {
-          var out = [];
-          var seed = 1;
-          for (var d = 0; d < 7; d++) {
-            for (var h = 0; h < 24; h++) {
-              // focus on business hours with a midday peak
-              var peak = Math.exp(-Math.pow((h - 13) / 4, 2));
-              var base = (h >= 7 && h <= 19) ? (40 + 260 * peak) : 10;
-              var n = (rand(seed++) - 0.5) * noise;
-              var v = Math.max(0, Math.round((base + n) * mult));
-              if (v === 0 && rand(seed++) < 0.3) continue; // sparse data
-              var ts = new Date(start.getTime() + d * 86400000 + h * 3600000).getTime();
-              out.push([ts, v]);
-            }
+      function makeSeries(mult, noise) {
+        var out = [];
+        var seed = 1;
+        for (var d = 0; d < 7; d++) {
+          for (var h = 0; h < 24; h++) {
+            // focus on business hours with a midday peak
+            var peak = Math.exp(-Math.pow((h - 13) / 4, 2));
+            var base = (h >= 7 && h <= 19) ? (40 + 260 * peak) : 10;
+            var n = (rand(seed++) - 0.5) * noise;
+            var v = Math.max(0, Math.round((base + n) * mult));
+            if (v === 0 && rand(seed++) < 0.3) continue; // sparse data
+            var ts = new Date(start.getTime() + d * 86400000 + h * 3600000).getTime();
+            out.push([ts, v]);
           }
-          return out;
         }
+        return out;
+      }
 
-        window.self = window.self || {};
-        window.self.ctx = {
-          data: [
-            { dataKey: { name: "footfall", label: "Footfall" }, data: makeSeries(1.0, 60) },
-            { dataKey: { name: "conversion", label: "Conversion" }, data: makeSeries(0.6, 40) }
-          ],
-          $container: [document.getElementById("eh2-root")]
-        };
-      })();
-    </script>
-    <script src="./heatmap.js"></script>
-  </body>
+      window.self = window.self || {};
+      window.self.ctx = {
+        data: [
+          { dataKey: { name: "paymented_total", label: "Approach" }, data: makeSeries(1.0, 60) },
+          { dataKey: { name: "watching_total", label: "Watching" }, data: makeSeries(0.8, 50) },
+          { dataKey: { name: "pass_total", label: "Pass" }, data: makeSeries(1.5, 90) }
+        ],
+        datasources: [
+          {
+            dataKeys: [
+              { name: "paymented_total", label: "Approach" },
+              { name: "watching_total", label: "Watching" },
+              { name: "pass_total", label: "Pass" }
+            ]
+          }
+        ],
+        $container: [document.getElementById("eh2-root")]
+      };
+    })();
+  </script>
+  <script src="./heatmap.js"></script>
+</body>
+
 </html>
