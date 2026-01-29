@@ -63,7 +63,7 @@ function initServices() {
     const token = self.ctx.servicesMap.get("telemetryService") || self.ctx.servicesMap.get("telemetry");
     self.telemetryService = token ? inj.get(token) : null;
   } catch (e) { self.telemetryService = null; }
-  self.telemetryKey = (self.ctx.settings && self.ctx.settings.telemetryKey) || "pass_cam";
+  self.telemetryKey = (self.ctx.settings && self.ctx.settings.telemetryKey) || "cam_active";
   self.serverAttrKey = "current_cam";
   self.deviceLabelKey = "deviceLabel";
 }
@@ -571,7 +571,7 @@ function reloadCamForCurrentDevice(force) {
         (attrs || []).forEach(a => { if (a && a.key != null) map[a.key] = a.value; });
         const label = map[self.deviceLabelKey] != null ? String(map[self.deviceLabelKey]) : null;
         const currentCam = map[self.serverAttrKey] != null ? String(map[self.serverAttrKey]) : null;
-        const isTablet = (label === 'tablet-type' || label === 'tablet');
+        const isTablet = (label === 'Tablet' || label === 'tablet' || label === 'tablet-type');
 
         if (self.camCard) self.camCard.classList.toggle('cam-tablet', isTablet);
         if (self.camLabelEl) self.camLabelEl.textContent = isTablet ? 'タブレットカメラ' : 'エッジカメラ';
@@ -684,6 +684,16 @@ function parseCamOptions(raw) {
   try { obj = (typeof raw === "string") ? JSON.parse(raw) : raw; }
   catch (e) { return []; }
   if (!obj || typeof obj !== "object") return [];
+
+  // Support both old object shape and new array shape (e.g. [2,3,10]).
+  if (Array.isArray(obj)) {
+    return obj
+      .map(v => (v != null ? String(v) : ''))
+      .filter(Boolean)
+      .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
+      .map(k => `CAM_${k}`);
+  }
+
   return Object.keys(obj)
     .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
     .map(k => `CAM_${k}`);

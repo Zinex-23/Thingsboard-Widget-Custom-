@@ -277,3 +277,7 @@
   .custom-select-card, .action-card { width: 100%; }
   .action-card { order: 4; }
 }
+/* Device dropdown arrow – blue like device icon */
+.device-card .card-arrow path {
+  stroke: #3B82F6;
+}
