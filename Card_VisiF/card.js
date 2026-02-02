@@ -45,6 +45,101 @@
     };
   }
 
+  function isDebugEnabled() {
+    try {
+      return !!(self.ctx && self.ctx.settings && self.ctx.settings.debugCard);
+    } catch (e) { return false; }
+  }
+
+  function debugCardSnapshot() {
+    try {
+      const utcState = readUtcWidgetState();
+      const utcCurrentCtx = getUtcCurrentWindowContext();
+      const twCtx = utcCurrentCtx || getTimeWindow();
+      const prevCtxs = getPrevContextCandidates(twCtx, !!utcCurrentCtx);
+      const st = readStateParams();
+      const mode = getSelectedMode(st);
+      const singleId = getSingleIdFromStateOrCtx(st);
+      const ids = getAllIdsRobust(st);
+      const keyName = getConfiguredKeyName();
+      const payload = {
+        keyName,
+        mode,
+        singleId,
+        idsCount: (ids || []).length,
+        utcState,
+        current: twCtx,
+        prevCandidates: prevCtxs
+      };
+      console.info('[card][debug]', payload);
+      return payload;
+    } catch (e) {
+      console.warn('[card][debug] failed:', e);
+      return { error: String(e && e.message ? e.message : e) };
+    }
+  }
+
+  async function debugCardFetch() {
+    try {
+      const snap = debugCardSnapshot();
+      if (!snap || snap.error) return snap || { error: 'no snapshot' };
+      if (snap.mode !== 'SINGLE' || !snap.singleId) {
+        return { error: 'debugCardFetch supports SINGLE mode only', snap };
+      }
+      const cur = snap.current;
+      const prev = (snap.prevCandidates && snap.prevCandidates[0]) ? snap.prevCandidates[0] : null;
+      if (!cur || !cur.startTs || !cur.endTs) return { error: 'invalid current window', snap };
+      if (!prev || !prev.startTs || !prev.endTs) return { error: 'invalid prev window', snap };
+
+      const deviceId = snap.singleId;
+      const keyName = snap.keyName;
+      const curInterval = pickIntervalMs(cur.startTs, cur.endTs);
+      const prevInterval = pickIntervalMs(prev.startTs, prev.endTs);
+
+      const curSum = await fetchTimeseries(deviceId, keyName, cur.startTs, cur.endTs, 'SUM', curInterval, 50000);
+      const prevSum = await fetchTimeseries(deviceId, keyName, prev.startTs, prev.endTs, 'SUM', prevInterval, 50000);
+
+      const curRaw = (curSum && curSum.length) ? null :
+        await fetchTimeseries(deviceId, keyName, cur.startTs, cur.endTs, 'NONE', null, 50000);
+      const prevRaw = (prevSum && prevSum.length) ? null :
+        await fetchTimeseries(deviceId, keyName, prev.startTs, prev.endTs, 'NONE', null, 50000);
+
+      const payload = {
+        deviceId,
+        keyName,
+        current: {
+          startTs: cur.startTs,
+          endTs: cur.endTs,
+          sumCount: (curSum || []).length,
+          sumPoints: curSum,
+          rawCount: (curRaw || []).length,
+          rawPoints: curRaw
+        },
+        prev: {
+          startTs: prev.startTs,
+          endTs: prev.endTs,
+          sumCount: (prevSum || []).length,
+          sumPoints: prevSum,
+          rawCount: (prevRaw || []).length,
+          rawPoints: prevRaw
+        }
+      };
+      console.info('[card][debug-fetch]', payload);
+      return payload;
+    } catch (e) {
+      console.warn('[card][debug-fetch] failed:', e);
+      return { error: String(e && e.message ? e.message : e) };
+    }
+  }
+
+  function registerDebugCard() {
+    try { self.debugCard = debugCardSnapshot; } catch (e) { }
+    try { (window.top || window).debugCard = debugCardSnapshot; } catch (e) { }
+    try { (window.top || window).__cardDebug = debugCardSnapshot; } catch (e) { }
+    try { self.debugCardFetch = debugCardFetch; } catch (e) { }
+    try { (window.top || window).__cardDebugFetch = debugCardFetch; } catch (e) { }
+  }
+
   function safeGetToken() {
     try { return localStorage.getItem('jwt_token') || localStorage.getItem('token') || ''; }
     catch (e) { return ''; }
@@ -233,16 +328,43 @@
     return null;
   }
 
+  function isDayMode(tw) {
+    if (!tw) return false;
+    const start = tw.minTime || tw.fixedWindow?.startTimeMs;
+    const end = tw.maxTime || tw.fixedWindow?.endTimeMs;
+    if (!start || !end) return false;
+
+    const ONE_DAY = 24 * 60 * 60 * 1000;
+    if (end - start > ONE_DAY + 15 * 60 * 1000) return false;
+
+    const s = new Date(start), e = new Date(end);
+    return s.getFullYear() === e.getFullYear() &&
+      s.getMonth() === e.getMonth() &&
+      s.getDate() === e.getDate();
+  }
+
+  function getDayWindowFull(tw) {
+    const ref = tw.fixedWindow?.startTimeMs || tw.minTime || Date.now();
+    const d = new Date(ref);
+    const y = d.getFullYear(), m = d.getMonth(), day = d.getDate();
+    const start0 = new Date(y, m, day, 0, 0, 0, 0).getTime();
+    const end24 = new Date(y, m, day, 23, 59, 59, 999).getTime();
+    return [start0, end24];
+  }
+
   function getTimeWindow() {
     const tw = getEffectiveTimewindow();
-    if (!tw) return { startTs: null, endTs: null };
+    if (!tw) return { startTs: null, endTs: null, displayStart: null, displayEnd: null, flags: null, dayMode: false };
 
     const fixed = tw.history?.fixedTimewindow;
+    let startTs = null;
+    let endTs = null;
     if (fixed?.startTimeMs != null && fixed?.endTimeMs != null) {
-      return { startTs: fixed.startTimeMs, endTs: fixed.endTimeMs };
-    }
-    if (tw.startTs != null && tw.endTs != null) {
-      return { startTs: tw.startTs, endTs: tw.endTs };
+      startTs = fixed.startTimeMs;
+      endTs = fixed.endTimeMs;
+    } else if (tw.startTs != null && tw.endTs != null) {
+      startTs = tw.startTs;
+      endTs = tw.endTs;
     }
 
     const windowMs =
@@ -250,14 +372,213 @@
       (tw.history?.timewindowMs != null) ? Number(tw.history.timewindowMs) :
       null;
 
-    if (windowMs && isFinite(windowMs)) {
+    if ((!startTs || !endTs) && windowMs && isFinite(windowMs)) {
       const end = Date.now();
-      return { startTs: end - windowMs, endTs: end };
+      startTs = end - windowMs;
+      endTs = end;
     }
 
-    const startTs = tw.minTime || tw.fixedWindow?.startTimeMs || null;
-    const endTs = tw.maxTime || tw.fixedWindow?.endTimeMs || null;
-    return { startTs, endTs };
+    if (!startTs || !endTs) {
+      startTs = tw.minTime || tw.fixedWindow?.startTimeMs || null;
+      endTs = tw.maxTime || tw.fixedWindow?.endTimeMs || null;
+    }
+
+    const dayMode = isDayMode(tw);
+    if (dayMode) {
+      const full = getDayWindowFull(tw);
+      startTs = full[0];
+      endTs = full[1];
+    }
+
+    const flags = getModeFlags(startTs, endTs);
+    let displayStart = startTs;
+    let displayEnd = endTs;
+    if (dayMode && startTs != null) {
+      const d = new Date(startTs);
+      displayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 7, 0, 0, 0).getTime();
+      displayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 19, 0, 0, 0).getTime();
+    }
+
+    return { startTs, endTs, displayStart, displayEnd, flags, dayMode };
+  }
+
+  function getModeFlags(startTs, endTs) {
+    const spanDays = (endTs && startTs) ? (endTs - startTs) / (24 * 60 * 60 * 1000) : 0;
+    const isYearMode = spanDays >= 300;
+    const isMonthMode = !isYearMode && spanDays > 1;
+    const isHourlyGapMode = spanDays <= 1;
+    return { isYearMode, isMonthMode, isHourlyGapMode };
+  }
+
+  function makeWindowContext(startTs, endTs, dayMode) {
+    if (!startTs || !endTs) {
+      return { startTs: null, endTs: null, displayStart: null, displayEnd: null, flags: null, dayMode: !!dayMode };
+    }
+    const flags = getModeFlags(startTs, endTs);
+    let displayStart = startTs;
+    let displayEnd = endTs;
+    if (dayMode) {
+      const d = new Date(startTs);
+      displayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 7, 0, 0, 0).getTime();
+      displayEnd = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 19, 0, 0, 0).getTime();
+    }
+    return { startTs, endTs, displayStart, displayEnd, flags, dayMode: !!dayMode };
+  }
+
+  function readUtcWidgetState() {
+    const STORAGE_KEY = 'timewindow_widget_utc_state';
+    const SHARED_OFFSET_KEY = 'timewindow_widget_utc_offset_min';
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const offsetRaw = localStorage.getItem(SHARED_OFFSET_KEY);
+      const offsetMin = Number(offsetRaw);
+      if (!raw) return null;
+      const state = JSON.parse(raw);
+      if (!state || !state.mode) return null;
+      return {
+        mode: state.mode,
+        year: state.year,
+        month: state.month,
+        day: state.day,
+        offsetMin: Number.isFinite(offsetMin) ? offsetMin : 0
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function utcStartEndFor(mode, y, m, d, offsetMin) {
+    if (mode === 'day') {
+      const start = Date.UTC(y, m, d, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = Date.UTC(y, m, d, 23, 59, 59, 999) - offsetMin * 60000;
+      return { start, end, dayMode: true };
+    }
+    if (mode === 'month') {
+      const start = Date.UTC(y, m, 1, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = Date.UTC(y, m + 1, 0, 23, 59, 59, 999) - offsetMin * 60000;
+      return { start, end, dayMode: false };
+    }
+    if (mode === 'year') {
+      const start = Date.UTC(y, 0, 1, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = Date.UTC(y, 11, 31, 23, 59, 59, 999) - offsetMin * 60000;
+      return { start, end, dayMode: false };
+    }
+    return null;
+  }
+
+  function nowPartsForOffset(offsetMin) {
+    const n = new Date(Date.now() + (Number(offsetMin) || 0) * 60000);
+    return { y: n.getUTCFullYear(), m: n.getUTCMonth(), d: n.getUTCDate() };
+  }
+
+  function daysInMonthUtc(y, m) {
+    return new Date(Date.UTC(y, m + 1, 0)).getUTCDate();
+  }
+
+  function getUtcCurrentWindowContext() {
+    const utcState = readUtcWidgetState();
+    if (!utcState || typeof utcState.year !== 'number' || typeof utcState.month !== 'number' || typeof utcState.day !== 'number') {
+      return null;
+    }
+    const mode = utcState.mode;
+    const y = utcState.year;
+    const m = utcState.month;
+    const d = utcState.day;
+    const offsetMin = utcState.offsetMin || 0;
+    const nowParts = nowPartsForOffset(offsetMin);
+    const isCurrentDay = (y === nowParts.y && m === nowParts.m && d === nowParts.d);
+    const isCurrentMonth = (y === nowParts.y && m === nowParts.m);
+    const isCurrentYear = (y === nowParts.y);
+
+    if (mode === 'day') {
+      const start = Date.UTC(y, m, d, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = isCurrentDay
+        ? (Date.now() + offsetMin * 60000) - offsetMin * 60000
+        : Date.UTC(y, m, d, 23, 59, 59, 999) - offsetMin * 60000;
+      return makeWindowContext(start, end, true);
+    }
+
+    if (mode === 'month') {
+      const start = Date.UTC(y, m, 1, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = isCurrentMonth
+        ? (Date.now() + offsetMin * 60000) - offsetMin * 60000
+        : Date.UTC(y, m + 1, 0, 23, 59, 59, 999) - offsetMin * 60000;
+      return makeWindowContext(start, end, false);
+    }
+
+    if (mode === 'year') {
+      const start = Date.UTC(y, 0, 1, 0, 0, 0, 0) - offsetMin * 60000;
+      const end = isCurrentYear
+        ? (Date.now() + offsetMin * 60000) - offsetMin * 60000
+        : Date.UTC(y, 11, 31, 23, 59, 59, 999) - offsetMin * 60000;
+      return makeWindowContext(start, end, false);
+    }
+
+    return null;
+  }
+
+  function getPrevWindowContext(ctx) {
+    if (!ctx || !ctx.startTs || !ctx.endTs) return null;
+
+    const utcState = readUtcWidgetState();
+    if (utcState && utcState.mode) {
+      const mode = utcState.mode;
+      const span = ctx.endTs - ctx.startTs;
+      if (!span || !Number.isFinite(span)) return null;
+
+      if (mode === 'day') {
+        const prevStart = ctx.startTs - 24 * 60 * 60 * 1000;
+        const prevEnd = ctx.endTs - 24 * 60 * 60 * 1000;
+        return makeWindowContext(prevStart, prevEnd, true);
+      }
+
+      if (mode === 'month') {
+        const offsetMin = utcState.offsetMin || 0;
+        const y = utcState.year;
+        const m = utcState.month;
+        const prevMonthDate = new Date(Date.UTC(y, m, 1));
+        prevMonthDate.setUTCMonth(prevMonthDate.getUTCMonth() - 1);
+        const py = prevMonthDate.getUTCFullYear();
+        const pm = prevMonthDate.getUTCMonth();
+        const prevStart = Date.UTC(py, pm, 1, 0, 0, 0, 0) - offsetMin * 60000;
+        const prevEnd = prevStart + span;
+        return makeWindowContext(prevStart, prevEnd, false);
+      }
+
+      if (mode === 'year') {
+        const offsetMin = utcState.offsetMin || 0;
+        const y = utcState.year - 1;
+        const prevStart = Date.UTC(y, 0, 1, 0, 0, 0, 0) - offsetMin * 60000;
+        const prevEnd = prevStart + span;
+        return makeWindowContext(prevStart, prevEnd, false);
+      }
+    }
+
+    const span = ctx.endTs - ctx.startTs;
+    if (!span || !Number.isFinite(span)) return null;
+    const prevStart = ctx.startTs - span;
+    const prevEnd = ctx.startTs;
+    return makeWindowContext(prevStart, prevEnd, ctx.dayMode);
+  }
+
+  function getPrevContextCandidates(primaryCtx, utcUsed) {
+    const list = [];
+    const p = getPrevWindowContext(primaryCtx);
+    if (p) list.push(p);
+
+    if (utcUsed) {
+      const dashCtx = getTimeWindow();
+      if (dashCtx && dashCtx.startTs && dashCtx.endTs) {
+        const span = dashCtx.endTs - dashCtx.startTs;
+        if (span && Number.isFinite(span)) {
+          const prevStart = dashCtx.startTs - span;
+          const prevEnd = dashCtx.startTs;
+          list.push(makeWindowContext(prevStart, prevEnd, dashCtx.dayMode));
+        }
+      }
+    }
+
+    return list;
   }
 
   function pickIntervalMs(startTs, endTs) {
@@ -298,24 +619,6 @@
 
     sub.data = [sub.data[0]];
     sub.data[0].data = [[now, value]];
-
-    // Keep latestData array intact so additional latest data keys can update via TB
-    if (Array.isArray(sub.latestData) && sub.latestData.length) {
-      const keyName = getConfiguredKeyName();
-      let updated = false;
-      for (let i = 0; i < sub.latestData.length; i++) {
-        const dk = sub.latestData[i]?.dataKey;
-        const dkName = normalizeKeyName(dk?.name || dk?.label || '');
-        if (dkName && dkName === normalizeKeyName(keyName)) {
-          sub.latestData[i].data = [[now, value]];
-          updated = true;
-        }
-      }
-      // Fallback: update first entry only if no match found
-      if (!updated) {
-        sub.latestData[0].data = [[now, value]];
-      }
-    }
   }
 
   function updateLatestCompareKeys(currentValue, prevValue) {
@@ -329,8 +632,10 @@
     const cfg = getCompareKeyConfig();
     const wantDelta = cfg.deltaName;
     const wantPct = cfg.percentName;
+    const wantDeltaNorm = normalizeKeyName(wantDelta).toLowerCase();
+    const wantPctNorm = normalizeKeyName(wantPct).toLowerCase();
 
-    function pickTypeFromDataKey(dk) {
+    function classifyCompareKey(dk) {
       const raw = String(dk?.label || dk?.name || '').toLowerCase();
       if (!raw) return '';
       if (raw.includes('%') || raw.includes('percent') || raw.includes('pct') || raw.includes('ratio')) return 'pct';
@@ -340,35 +645,29 @@
       return '';
     }
 
-    let assigned = 0;
     for (let i = 0; i < sub.latestData.length; i++) {
       const dk = sub.latestData[i]?.dataKey;
       const dkRaw = String(dk?.name || dk?.label || '').trim();
-      if (wantDelta && dkRaw === wantDelta) {
+      const dkNorm = normalizeKeyName(dkRaw).toLowerCase();
+      const kind = classifyCompareKey(dk);
+
+      if (wantDeltaNorm && dkNorm === wantDeltaNorm) {
         sub.latestData[i].data = [[now, delta]];
-        assigned++;
         continue;
       }
-      if (wantPct && dkRaw === wantPct) {
+      if (wantPctNorm && dkNorm === wantPctNorm) {
         sub.latestData[i].data = [[now, pct]];
-        assigned++;
         continue;
       }
 
-      const type = pickTypeFromDataKey(dk);
-      if (type === 'delta') {
-        sub.latestData[i].data = [[now, delta]];
-        assigned++;
-      } else if (type === 'pct') {
-        sub.latestData[i].data = [[now, pct]];
-        assigned++;
+      if (!wantDelta && !wantPct) {
+        if (kind === 'delta') sub.latestData[i].data = [[now, delta]];
+        if (kind === 'pct') sub.latestData[i].data = [[now, pct]];
+        continue;
       }
-    }
 
-    // Fallback by position if no label match (common: 2 latest keys)
-    if (assigned === 0 && sub.latestData.length >= 2) {
-      sub.latestData[0].data = [[now, delta]];
-      sub.latestData[1].data = [[now, pct]];
+      if (wantDelta && kind === 'delta') sub.latestData[i].data = [[now, delta]];
+      if (wantPct && kind === 'pct') sub.latestData[i].data = [[now, pct]];
     }
   }
 
@@ -414,6 +713,13 @@
     return s;
   }
 
+  function lastBucketValue(points) {
+    if (!Array.isArray(points) || !points.length) return 0;
+    const last = points[points.length - 1];
+    const v = Number(last?.value);
+    return Number.isFinite(v) ? v : 0;
+  }
+
   function computePositiveDeltasFromPoints(points) {
     const pts = (points || [])
       .map(p => ({ ts: Number(p.ts), v: Number(p.value) }))
@@ -428,12 +734,121 @@
     return s;
   }
 
+  function normalizeTimestamp(ms, opts) {
+    const { isMonthMode, isYearMode, isHourlyGapMode } = opts || {};
+    const x = new Date(ms);
+    if (isYearMode) return new Date(x.getFullYear(), x.getMonth(), 1, 0, 0, 0, 0).getTime();
+    if (isMonthMode) return new Date(x.getFullYear(), x.getMonth(), x.getDate(), 0, 0, 0, 0).getTime();
+    if (isHourlyGapMode) return new Date(x.getFullYear(), x.getMonth(), x.getDate(), x.getHours(), 0, 0, 0).getTime();
+    return new Date(x.getFullYear(), x.getMonth(), x.getDate(), 0, 0, 0, 0).getTime();
+  }
+
+  function pickLastValueInRange(points, startTs, endTs) {
+    if (!Array.isArray(points) || !points.length) return 0;
+    let lastTs = -Infinity;
+    let lastVal = 0;
+    for (const p of points) {
+      const ts = Number(p[0] ?? p.t ?? p.ts);
+      const val = Number(p[1] ?? p.y ?? p.value);
+      if (!Number.isFinite(ts) || !Number.isFinite(val)) continue;
+      if (startTs != null && ts < startTs) continue;
+      if (endTs != null && ts > endTs) continue;
+      if (ts > lastTs) { lastTs = ts; lastVal = val; }
+    }
+    return (lastTs === -Infinity) ? 0 : lastVal;
+  }
+
+  function pickLastValueFromMap(mapObj, startTs, endTs) {
+    if (!mapObj) return 0;
+    let lastTs = -Infinity;
+    let lastVal = 0;
+    Object.keys(mapObj).forEach(k => {
+      const ts = Number(k);
+      if (!Number.isFinite(ts)) return;
+      if (startTs != null && ts < startTs) return;
+      if (endTs != null && ts > endTs) return;
+      if (ts > lastTs) { lastTs = ts; lastVal = Number(mapObj[k]) || 0; }
+    });
+    return (lastTs === -Infinity) ? 0 : lastVal;
+  }
+
+  function getSubscriptionSeriesPoints(keyName, startTs, endTs) {
+    const sub = self.ctx?.defaultSubscription;
+    const list = sub?.data || [];
+    if (!list.length) return [];
+    const normKey = normalizeKeyName(keyName);
+    let picked = null;
+    for (let i = 0; i < list.length; i++) {
+      const dk = list[i]?.dataKey;
+      const dkName = normalizeKeyName(dk?.name || dk?.label || '');
+      if (dkName && dkName === normKey) { picked = list[i]; break; }
+    }
+    if (!picked) picked = list[0];
+    const pts = Array.isArray(picked?.data) ? picked.data : [];
+    if (!startTs && !endTs) return pts;
+    return pts.filter(p => (!startTs || p[0] >= startTs) && (!endTs || p[0] <= endTs));
+  }
+
+  function computeSingleValueFromSubscription(keyName, ctx) {
+    const pts = getSubscriptionSeriesPoints(keyName, ctx.displayStart, ctx.displayEnd);
+    if (!pts || !pts.length) return null;
+    return pickLastValueInRange(pts, ctx.displayStart, ctx.displayEnd);
+  }
+
+  async function fetchRawTimeseries(deviceId, keyName, startTs, endTs, signal) {
+    return fetchTimeseries(deviceId, keyName, startTs, endTs, 'NONE', null, 50000, signal);
+  }
+
+  async function computeDeviceSumWindow(deviceId, keyName, startTs, endTs, signal) {
+    if (!deviceId || !startTs || !endTs) return 0;
+    const interval = pickIntervalMs(startTs, endTs);
+    const buckets = await fetchTimeseries(deviceId, keyName, startTs, endTs, 'SUM', interval, 50000, signal);
+    const sumVal = sumBucketValues(buckets);
+    if (sumVal !== 0 || (buckets && buckets.length)) return sumVal;
+
+    // Fallback: sum raw points if SUM returns empty
+    const pts = await fetchTimeseries(deviceId, keyName, startTs, endTs, 'NONE', null, 50000, signal);
+    let rawSum = 0;
+    for (const p of (pts || [])) {
+      const v = Number(p?.value);
+      if (Number.isFinite(v)) rawSum += v;
+    }
+    return rawSum;
+  }
+
+  async function computeDeviceValueChartLogic(deviceId, keyName, ctx, signal) {
+    if (!deviceId) return 0;
+    const pts = await fetchRawTimeseries(deviceId, keyName, ctx.startTs, ctx.endTs, signal);
+    if (!pts || !pts.length) return 0;
+    const mapped = pts.map(p => [Number(p.ts), Number(p.value)]);
+    return pickLastValueInRange(mapped, ctx.displayStart, ctx.displayEnd);
+  }
+
+  async function computeAllDevicesValueChartLogic(deviceIds, keyName, ctx, signal) {
+    const opts = ctx.flags || {};
+    const aggregated = {};
+    const ids = deviceIds || [];
+    for (let i = 0; i < ids.length; i++) {
+      const deviceId = ids[i];
+      const pts = await fetchRawTimeseries(deviceId, keyName, ctx.startTs, ctx.endTs, signal);
+      if (!pts || !pts.length) continue;
+      for (const p of pts) {
+        const ts = Number(p.ts);
+        const val = Number(p.value) || 0;
+        if (!Number.isFinite(ts)) continue;
+        const normTs = normalizeTimestamp(ts, opts);
+        if (!aggregated[normTs]) aggregated[normTs] = 0;
+        aggregated[normTs] += val;
+      }
+    }
+    return pickLastValueFromMap(aggregated, ctx.displayStart, ctx.displayEnd);
+  }
+
   // ========= Aggregators =========
   async function computeDeviceValue(deviceId, keyName, startTs, endTs, signal) {
     if (AGG_MODE === 'SUM_BUCKETS') {
-      const interval = pickIntervalMs(startTs, endTs);
-      const buckets = await fetchTimeseries(deviceId, keyName, startTs, endTs, 'SUM', interval, 50000, signal);
-      return sumBucketValues(buckets);
+      // Total value over the timewindow
+      return computeDeviceSumWindow(deviceId, keyName, startTs, endTs, signal);
     }
 
     if (AGG_MODE === 'DELTA_MAX_MIN') {
@@ -504,6 +919,7 @@
   // ========= Lifecycle =========
   self.onInit = function () {
     self.ctx.$scope.aggregatedValueCardWidget.onInit();
+    registerDebugCard();
     ensureOverlay();
 
     if (self.ctx.stateController && self.ctx.stateController.stateChanged) {
@@ -620,15 +1036,13 @@
     lastModeApplied = mode;
     if (mode === 'SINGLE' && singleId) lastSingleIdApplied = singleId;
 
-    const { startTs, endTs } = getTimeWindow();
-    if (!startTs || !endTs) {
+    const utcCurrentCtx = getUtcCurrentWindowContext();
+    const twCtx = utcCurrentCtx || getTimeWindow();
+    if (!twCtx.startTs || !twCtx.endTs) {
       hideOverlay();
       return;
     }
-    // Use widget-calculated values (no custom aggregation)
-    hideOverlay();
-    renderCard();
-    return;
+    const prevCtxs = getPrevContextCandidates(twCtx, !!utcCurrentCtx);
 
     if (!isAllMode) {
       if (!singleId || singleId === '__ALL__') {
@@ -646,18 +1060,26 @@
 
       try {
         const keyName = getConfiguredKeyName();
-        const value = await computeDeviceValue(singleId, keyName, startTs, endTs, controller.signal);
+        let value = await computeDeviceValue(singleId, keyName, twCtx.startTs, twCtx.endTs, controller.signal);
         let prevValue = 0;
-        const prev = getPrevWindow(startTs, endTs);
-        if (prev) {
-          prevValue = await computeDeviceValue(singleId, keyName, prev.startTs, prev.endTs, controller.signal);
+        for (let i = 0; i < prevCtxs.length; i++) {
+          const c = prevCtxs[i];
+          if (!c) continue;
+          prevValue = await computeDeviceValue(singleId, keyName, c.startTs, c.endTs, controller.signal);
+          if (prevValue !== 0) break;
+        }
+        if (isDebugEnabled()) {
+          console.log('[card] SINGLE', {
+            keyName,
+            cur: { start: twCtx.startTs, end: twCtx.endTs, value },
+            prev: prevCtxs && prevCtxs.length ? { start: prevCtxs[0].startTs, end: prevCtxs[0].endTs, value: prevValue } : null
+          });
         }
 
         if (controller.signal.aborted) return;
         if (mySeq !== fetchSeq) return;
 
         injectAggregatedValueToSubscription(value);
-        updateLatestCompareKeys(value, prevValue);
         renderCard();
         hideOverlay();
       } catch (e) {
@@ -695,11 +1117,21 @@
       backupSubscriptionIfNeeded();
 
       const keyName = getConfiguredKeyName();
-      const value = await computeAllDevices(ids, keyName, startTs, endTs, controller.signal);
+      let value = await computeAllDevices(ids, keyName, twCtx.startTs, twCtx.endTs, controller.signal);
       let prevValue = 0;
-      const prev = getPrevWindow(startTs, endTs);
-      if (prev) {
-        prevValue = await computeAllDevices(ids, keyName, prev.startTs, prev.endTs, controller.signal);
+      for (let i = 0; i < prevCtxs.length; i++) {
+        const c = prevCtxs[i];
+        if (!c) continue;
+        prevValue = await computeAllDevices(ids, keyName, c.startTs, c.endTs, controller.signal);
+        if (prevValue !== 0) break;
+      }
+      if (isDebugEnabled()) {
+        console.log('[card] ALL', {
+          keyName,
+          ids: (ids || []).length,
+          cur: { start: twCtx.startTs, end: twCtx.endTs, value },
+          prev: prevCtxs && prevCtxs.length ? { start: prevCtxs[0].startTs, end: prevCtxs[0].endTs, value: prevValue } : null
+        });
       }
 
       if (controller.signal.aborted) return;
@@ -709,7 +1141,6 @@
       if (buildSignature() !== lastSig) return;
 
       injectAggregatedValueToSubscription(value);
-      updateLatestCompareKeys(value, prevValue);
       renderCard();
       hideOverlay();
     } catch (e) {

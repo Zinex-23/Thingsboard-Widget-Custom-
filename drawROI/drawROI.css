@@ -252,10 +252,12 @@
     font-weight: 700;
     margin: 0 4px;
     line-height: 1;
+    display: inline-block;
 }
 
 .roi-hint.is-edge .hint-arrow {
-    font-size: 16px;
+    font-size: 20px;
+    transform: scaleX(1.6);
 }
 /* ===== Loading overlay - mượt hơn ===== */
 .loading-overlay {

@@ -269,7 +269,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
                 { value: '__ALL__', label: `All devices` },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
-            defaultSelection = devices.length ? devices[0].id : '__ALL__';
+            defaultSelection = '__ALL__';
         }
 
         // No placeholder - start directly with options

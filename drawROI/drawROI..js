@@ -94,8 +94,7 @@ self.onInit = function () {
             err_need_in_out: 'Please select at least one IN_OUT line.',
             err_invalid_stat_cfg: 'Invalid statistic_config format.',
             hint_tablet: 'Tap 4 points to draw a zone. Tap one edge to enable counting on that line.',
-            hint_edge_entry: 'Entry',
-            hint_edge_exit: 'Exit'
+            hint_edge_entry: 'Pass'
         },
         ja: {
             save: '保存',
@@ -121,8 +120,7 @@ self.onInit = function () {
             err_need_in_out: 'IN_OUTの線を1本以上選択してください。',
             err_invalid_stat_cfg: 'statistic_configの形式が不正です。',
             hint_tablet: '4点をタップしてゾーンを作成します。1つの辺をタップしてカウントを有効にします。',
-            hint_edge_entry: '入場',
-            hint_edge_exit: '退場'
+            hint_edge_entry: '通過'
         }
     };
 
@@ -214,7 +212,7 @@ self.onInit = function () {
             roiHintEl.style.display = '';
         } else if (self._mode === 'edge') {
             roiHintEl.classList.add('is-edge');
-            roiHintEl.innerHTML = `<span class="hint-square square-green"></span><span class="hint-arrow">→</span><span class="hint-square square-red"></span> ${t('hint_edge_entry')}&nbsp;&nbsp;|&nbsp;&nbsp;<span class="hint-square square-red"></span><span class="hint-arrow">→</span><span class="hint-square square-green"></span> ${t('hint_edge_exit')}`;
+            roiHintEl.innerHTML = `<span class="hint-square square-green"></span><span class="hint-arrow">→</span><span class="hint-square square-red"></span> ${t('hint_edge_entry')}`;
             roiHintEl.style.display = '';
         } else {
             roiHintEl.style.display = 'none';
