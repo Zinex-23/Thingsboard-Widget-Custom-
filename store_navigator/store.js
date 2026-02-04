@@ -86,7 +86,7 @@ self.onDestroy = function () {
 };
 
 async function init() {
-    setStatus('Loading device types...');
+    setStatus(' ');
     try {
         // //console.log('[store_type] Initializing widget...');
         const types = await fetchDeviceTypes();
@@ -238,7 +238,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
         self.updateLabels();
         return;
     }
-    setStatus('Loading devices...');
+    setStatus(' ');
     try {
         self.isLoadingOptions = true;
         // //console.log('[store_type] Loading devices for type:', type);
@@ -269,7 +269,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
                 { value: '__ALL__', label: `All devices` },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
-            defaultSelection = '__ALL__';
+            defaultSelection = devices.length ? devices[0].id : '__ALL__';
         }
 
         // No placeholder - start directly with options
@@ -416,33 +416,62 @@ function ensureStoreDropdownManager() {
         },
         position: function (anchorEl) {
             if (!this.dropdown || !anchorEl) return;
+
+            // Get anchor rect in iframe coordinates
             var a = anchorEl.getBoundingClientRect();
+
+            // Get iframe position in top window
             var fe = window.frameElement;
             var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
-            var scaleX = 1;
-            var scaleY = 1;
-            if (fe) {
-                var feW = fe.clientWidth || fe.offsetWidth || f.width || 0;
-                var feH = fe.clientHeight || fe.offsetHeight || f.height || 0;
-                if (feW && f.width) scaleX = f.width / feW;
-                if (feH && f.height) scaleY = f.height / feH;
-            }
-            var vv = (window.top || window).visualViewport;
-            var vvLeft = vv && typeof vv.offsetLeft === 'number' ? vv.offsetLeft : 0;
-            var vvTop = vv && typeof vv.offsetTop === 'number' ? vv.offsetTop : 0;
+
+            // Account for iframe border (clientLeft/clientTop)
+            var iframeBorderLeft = fe ? (fe.clientLeft || 0) : 0;
+            var iframeBorderTop = fe ? (fe.clientTop || 0) : 0;
+
+            // DEBUG: Log to diagnose offset issue
+            console.log('[DD Position]', {
+                anchor: { left: a.left, top: a.top, bottom: a.bottom, width: a.width },
+                iframe: { left: f.left, top: f.top },
+                iframeBorder: { left: iframeBorderLeft, top: iframeBorderTop },
+                calculated: { left: f.left + a.left + iframeBorderLeft, top: f.top + a.bottom + iframeBorderTop }
+            });
+
+            // Convert iframe coordinates to top window coordinates
+            // Add iframe border offset to account for iframe's border
             var gap = 6;
-            var left = f.left + (a.left * scaleX) + vvLeft;
-            var top = f.top + (a.bottom * scaleY) + vvTop + gap;
+            var left = f.left + a.left + iframeBorderLeft;
+            var top = f.top + a.bottom + iframeBorderTop + gap;
+
+            // Get viewport dimensions
             var vw = (window.top || window).innerWidth;
             var vh = (window.top || window).innerHeight;
+
             var dd = this.dropdown;
-            var ddW = dd.offsetWidth || 240;
+            
+            // Set width FIRST to match anchor width (before measuring offsetWidth)
+            var dropdownWidth = Math.max(160, a.width);
+            dd.style.width = dropdownWidth + 'px';
+            
+            // Now measure actual dimensions after width is set
+            var ddW = dd.offsetWidth || dropdownWidth;
             var ddH = dd.offsetHeight || 200;
-            if (left + ddW + gap > vw) left = Math.max(gap, vw - ddW - gap);
-            if (top + ddH + gap > vh) top = Math.max(gap, f.top + a.top - ddH - gap);
-            dd.style.left = Math.max(gap, left) + 'px';
-            dd.style.top = Math.max(gap, top) + 'px';
-            dd.style.width = Math.max(160, a.width * scaleX) + 'px';
+
+            // DON'T shift left if dropdown is wide - keep aligned with anchor
+            // Only adjust if dropdown would go completely off-screen
+            var finalLeft = left;
+            var finalTop = top;
+            
+            // If dropdown goes off right edge, allow it to extend or scroll
+            // Don't shift it left as that breaks alignment with anchor
+            
+            // If dropdown goes off bottom, flip it above anchor
+            if (top + ddH + gap > vh) {
+                finalTop = Math.max(gap, f.top + a.top + iframeBorderTop - ddH - gap);
+            }
+
+            // Set position
+            dd.style.left = Math.max(gap, finalLeft) + 'px';
+            dd.style.top = Math.max(gap, finalTop) + 'px';
         },
         close: function () {
             if (!this.overlay) return;
@@ -469,16 +498,30 @@ function wireCustomDropdowns() {
     if (!self.rootEl || self._dropdownHandler) return;
     var mgr = ensureStoreDropdownManager();
     self._dropdownHandler = function (e) {
-        var storeCard = e.target.closest('.store-card');
+        // Check device card first to ensure correct priority
         var deviceCard = e.target.closest('.device-card');
-        if (storeCard && self.typeSelect) {
-            e.stopPropagation();
-            mgr.open(self.typeSelect, storeCard, 'red');
-            return;
-        }
+        var storeCard = e.target.closest('.store-card');
+
+        console.log('[Click Handler]', {
+            target: e.target.tagName,
+            hasDevice: !!deviceCard,
+            hasStore: !!storeCard
+        });
+
+        // Device card takes priority
         if (deviceCard && self.deviceSelect) {
             e.stopPropagation();
+            console.log('[Opening Device DD]', deviceCard.className);
             mgr.open(self.deviceSelect, deviceCard, 'blue');
+            return;
+        }
+
+        // Then check store card
+        if (storeCard && self.typeSelect) {
+            e.stopPropagation();
+            console.log('[Opening Store DD]', storeCard.className);
+            mgr.open(self.typeSelect, storeCard, 'red');
+            return;
         }
     };
     self.rootEl.addEventListener('click', self._dropdownHandler);

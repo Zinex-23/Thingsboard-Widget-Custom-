@@ -12,11 +12,14 @@ self.onInit = function () {
     self.suppressAutoPersist = false;
 
     self.updateLabels = function () {
+        // Update Store Label
         if (self.typeSelect.options.length > 0 && self.typeSelect.selectedIndex >= 0) {
             self.storeDisplay.textContent = self.typeSelect.options[self.typeSelect.selectedIndex].text;
         } else {
             self.storeDisplay.textContent = '店舗を選択';
         }
+
+        // Update Device Label
         if (self.deviceSelect.options.length > 0 && self.deviceSelect.selectedIndex >= 0) {
             self.deviceDisplay.textContent = self.deviceSelect.options[self.deviceSelect.selectedIndex].text;
         } else {
@@ -41,10 +44,13 @@ self.onInit = function () {
     };
     self.deviceSelect.addEventListener('change', self.deviceChangeHandler);
 
+    // Flag to prevent infinite loops when updating UI from state
     self.isUpdatingFromState = false;
 
+    // ✅ Subscribe to dashboard state changes (e.g. back button)
     if (self.ctx.stateController) {
         self.stateSubscription = self.ctx.stateController.stateChanged().subscribe((params) => {
+            // //console.log('[store_type] 📡 State changed:', params);
             updateUiFromState(params);
         });
     }
@@ -54,38 +60,62 @@ self.onInit = function () {
 };
 
 self.onDestroy = function () {
-    if (self.stateSubscription) self.stateSubscription.unsubscribe();
-    if (self.typeSelect && self.typeChangeHandler) self.typeSelect.removeEventListener('change', self.typeChangeHandler);
-    if (self.deviceSelect && self.deviceChangeHandler) self.deviceSelect.removeEventListener('change', self.deviceChangeHandler);
-    if (self.typeAbort) { try { self.typeAbort.abort(); } catch (e) { } self.typeAbort = null; }
-    if (self.deviceAbort) { try { self.deviceAbort.abort(); } catch (e) { } self.deviceAbort = null; }
-    if (self.persistTimer) { clearTimeout(self.persistTimer); self.persistTimer = null; }
+    if (self.stateSubscription) {
+        self.stateSubscription.unsubscribe();
+    }
+    if (self.typeSelect && self.typeChangeHandler) {
+        self.typeSelect.removeEventListener('change', self.typeChangeHandler);
+    }
+    if (self.deviceSelect && self.deviceChangeHandler) {
+        self.deviceSelect.removeEventListener('change', self.deviceChangeHandler);
+    }
+    if (self.typeAbort) {
+        try { self.typeAbort.abort(); } catch (e) { }
+        self.typeAbort = null;
+    }
+    if (self.deviceAbort) {
+        try { self.deviceAbort.abort(); } catch (e) { }
+        self.deviceAbort = null;
+    }
+    if (self.persistTimer) {
+        clearTimeout(self.persistTimer);
+        self.persistTimer = null;
+    }
     teardownCustomDropdowns();
     try { ensureStoreDropdownManager().close(); } catch (e) { }
 };
 
 async function init() {
-    setStatus('デバイスタイプを読み込み中…');
+    setStatus(' ');
     try {
+        // //console.log('[store_type] Initializing widget...');
         const types = await fetchDeviceTypes();
+        // //console.log('[store_type] Fetched device types:', types);
         fillSelect(self.typeSelect, types, null);
         setStatus('');
 
+        // ✅ PRIORITY 1: Check Dashboard State (Deep Link / Back Button)
         let stateParams = null;
         if (self.ctx.stateController) {
             stateParams = self.ctx.stateController.getStateParams();
         }
 
         if (stateParams && stateParams.selectedDeviceType && types.includes(stateParams.selectedDeviceType)) {
+            // //console.log('[store_type] 📡 Restoring from Dashboard State:', stateParams);
             await updateUiFromState(stateParams);
-        } else {
+        }
+        // ✅ PRIORITY 2: Restore last selection from localStorage
+        else {
             const savedSelection = restoreSelection();
             if (savedSelection && savedSelection.deviceType && types.includes(savedSelection.deviceType)) {
+                // //console.log('[store_type] 📦 Restoring saved selection:', savedSelection);
                 self.typeSelect.value = savedSelection.deviceType;
                 self.updateLabels();
                 self.suppressAutoPersist = true;
                 await loadDevicesByType(savedSelection.deviceType, savedSelection.deviceId);
                 self.suppressAutoPersist = false;
+
+                // If last selection is a specific device, force ALL -> then switch to device
                 if (savedSelection.deviceId && savedSelection.deviceId !== '__ALL__') {
                     await forceAllThenDevice(savedSelection.deviceType, savedSelection.deviceId);
                 } else {
@@ -94,30 +124,36 @@ async function init() {
                     persistSelection();
                 }
             } else if (types.length) {
+                // Fallback: auto-load devices for first type
                 self.typeSelect.value = types[0];
                 self.updateLabels();
                 self.suppressAutoPersist = true;
                 await loadDevicesByType(types[0], null);
                 self.suppressAutoPersist = false;
+                // Default first open: select ALL first, then first device if available
                 await forceAllThenDevice(types[0], self.deviceSelect.value);
             } else {
+                // //console.warn('[store_type] No device types found');
                 setStatus('利用可能なデバイスタイプがありません');
                 self.updateLabels();
             }
         }
     } catch (error) {
-        setStatus('デバイスタイプの読み込みに失敗しました');
+        // //console.error('[store_type] Error in init():', error);
+        setStatus('デバイスタイプの読み込みに失敗しました: ' + error.message);
     }
 }
 
 async function forceAllThenDevice(type, deviceId) {
     if (!type) return;
+    // Warm-up with ALL internally (no state update to avoid chart flicker)
     if (self.deviceSelect.querySelector('option[value="__ALL__"]')) {
         self.deviceSelect.value = '__ALL__';
         self.updateLabels();
         self.isLoadingOptions = false;
         persistSelection({ silentState: true, skipStorage: true });
     }
+    // Then switch to specific device after a short delay to let dashboard bind data
     if (deviceId && deviceId !== '__ALL__') {
         await new Promise(r => setTimeout(r, 200));
         const optionExists = Array.from(self.deviceSelect.options).some(opt => opt.value === deviceId);
@@ -132,32 +168,44 @@ async function forceAllThenDevice(type, deviceId) {
 
 async function updateUiFromState(params) {
     if (!params) return;
+
     const type = params.selectedDeviceType;
     const deviceId = params.selectedDeviceId;
+
+    // //console.log('[store_type] 🔄 updateUiFromState:', { type, deviceId });
+
     if (!type) return;
 
     self.isUpdatingFromState = true;
     self.isLoadingOptions = true;
 
     try {
+        // 1. Sync Type
         if (self.typeSelect.value !== type) {
             self.typeSelect.value = type;
             self.updateLabels();
             self.suppressAutoPersist = true;
             await loadDevicesByType(type, deviceId);
             self.suppressAutoPersist = false;
-        } else if (isDeviceSelectEmpty()) {
-            self.suppressAutoPersist = true;
-            await loadDevicesByType(type, deviceId);
-            self.suppressAutoPersist = false;
+        } else {
+            // If device list is empty (race/abort), reload for current type
+            if (isDeviceSelectEmpty()) {
+                self.suppressAutoPersist = true;
+                await loadDevicesByType(type, deviceId);
+                self.suppressAutoPersist = false;
+            }
         }
 
+        // 2. Sync Device
         if (deviceId && self.deviceSelect.value !== deviceId) {
+            // Check if device exists in the loaded list
             const optionExists = Array.from(self.deviceSelect.options).some(opt => opt.value === deviceId);
             if (optionExists) {
                 self.deviceSelect.value = deviceId;
                 self.updateLabels();
             } else if (deviceId === '__ALL__') {
+                // Ensure __ALL__ option exists if it was expected but maybe not loaded yet? 
+                // (loadDevicesByType should have handled it if multiple devices exist)
                 if (self.deviceSelect.querySelector('option[value="__ALL__"]')) {
                     self.deviceSelect.value = '__ALL__';
                     self.updateLabels();
@@ -165,6 +213,7 @@ async function updateUiFromState(params) {
             }
         }
     } finally {
+        // Small delay to ensure UI settles before re-enabling persist
         setTimeout(() => {
             self.isUpdatingFromState = false;
             self.isLoadingOptions = false;
@@ -184,34 +233,46 @@ let typesReqSeq = 0;
 
 async function loadDevicesByType(type, preferredDeviceId) {
     if (!type) {
+        // No type selected - clear and return
         fillSelect(self.deviceSelect, [], null);
         self.updateLabels();
         return;
     }
-    setStatus('デバイスを読み込み中…');
+    setStatus(' ');
     try {
         self.isLoadingOptions = true;
-        if (self.deviceAbort) { try { self.deviceAbort.abort(); } catch (e) { } }
+        // //console.log('[store_type] Loading devices for type:', type);
+        if (self.deviceAbort) {
+            try { self.deviceAbort.abort(); } catch (e) { }
+        }
         const mySeq = ++devicesReqSeq;
         self.deviceAbort = new AbortController();
         const devices = await fetchDevices(type, self.deviceAbort.signal);
         if (mySeq !== devicesReqSeq) return;
         self.devicesByType[type] = devices;
-        self.currentDevices = devices;
+        self.currentDevices = devices; // Store for multi-select
+        // //console.log('[store_type] Fetched devices:', devices);
 
+        // Determine options based on device count
         let deviceOptions = [];
         let defaultSelection = '';
+
         if (devices.length === 1) {
+            // Single device: Remove "全デバイス" option, auto-select the only device
+            // //console.log('[store_type] Single device detected. Removing "全デバイス" option.');
             deviceOptions = devices.map(d => ({ value: d.id, label: d.name }));
             defaultSelection = devices[0].id;
         } else {
+            // Multiple devices (or 0): Keep "全デバイス" option, auto-select it
+            // //console.log('[store_type] Multiple devices detected. Adding "全デバイス" option.');
             deviceOptions = [
-                { value: '__ALL__', label: '全デバイス' },
+                { value: '__ALL__', label: `全デバイス` },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
             defaultSelection = devices.length ? devices[0].id : '__ALL__';
         }
 
+        // No placeholder - start directly with options
         fillSelect(self.deviceSelect, deviceOptions, null);
 
         if (!preferredDeviceId && self.lastSelection && self.lastSelection.deviceType === type) {
@@ -246,7 +307,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
             } else if (deviceOptions.length) {
                 self.deviceSelect.value = deviceOptions[0].value;
             }
-            self.updateLabels();
+            self.updateLabels(); // Call updatedLabels after value setting
             setStatus('');
             self.isLoadingOptions = false;
             if (!self.suppressAutoPersist && !self.isUpdatingFromState) {
@@ -254,239 +315,14 @@ async function loadDevicesByType(type, preferredDeviceId) {
             }
             return;
         }
-        setStatus('デバイスの読み込みに失敗しました');
+        // //console.error('[store_type] Error loading devices:', error);
+        setStatus('デバイスの読み込みに失敗しました: ' + error.message);
     } finally {
         setTimeout(() => { self.isLoadingOptions = false; }, 0);
     }
 }
 
-function fillSelect(selectEl, items, placeholder) {
-    selectEl.innerHTML = '';
-    if (placeholder) {
-        const ph = document.createElement('option');
-        ph.value = '';
-        ph.textContent = placeholder;
-        selectEl.appendChild(ph);
-    }
-    items.forEach(it => {
-        const opt = document.createElement('option');
-        if (typeof it === 'string') {
-            opt.value = it;
-            opt.textContent = it;
-        } else {
-            opt.value = it.value;
-            opt.textContent = it.label;
-        }
-        selectEl.appendChild(opt);
-    });
-}
-
-function setStatus(msg) {
-    if (!self.statusEl) return;
-    self.statusEl.textContent = msg || '';
-}
-
-function getToken() {
-    const jwtToken = localStorage.getItem('jwt_token');
-    const token = localStorage.getItem('token');
-    return jwtToken || token || '';
-}
-
-async function apiGet(url, signal) {
-    const token = getToken();
-    const res = await fetch(url, {
-        method: 'GET',
-        signal,
-        headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'X-Authorization': 'Bearer ' + token } : {})
-        }
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
-}
-
-async function fetchDeviceTypes() {
-    const user = self.ctx.currentUser;
-    if (user && user.authority === 'CUSTOMER_USER') {
-        const customerId = (user.customerId && user.customerId.id) ? user.customerId.id : user.customerId;
-        if (!customerId) return [];
-        const url = `/api/customer/${customerId}/deviceInfos?pageSize=1000&page=0`;
-        try {
-            if (self.typeAbort) { try { self.typeAbort.abort(); } catch (e) { } }
-            const mySeq = ++typesReqSeq;
-            self.typeAbort = new AbortController();
-            const r = await apiGet(url, self.typeAbort.signal);
-            if (mySeq !== typesReqSeq) return [];
-            const data = r.data || [];
-            return [...new Set(data.map(d => d.type))].filter(Boolean).sort();
-        } catch (e) { return []; }
-    }
-
-    if (self.typeAbort) { try { self.typeAbort.abort(); } catch (e) { } }
-    const mySeq = ++typesReqSeq;
-    self.typeAbort = new AbortController();
-    const r = await apiGet('/api/device/types', self.typeAbort.signal);
-    if (mySeq !== typesReqSeq) return [];
-    let types = Array.isArray(r) ? r : (r.deviceTypes || []);
-    if (types.length && typeof types[0] === 'object') {
-        types = types.map(t => t.type || t.name || t.deviceType || t.label || JSON.stringify(t));
-    }
-    return types;
-}
-
-async function fetchDevices(deviceType, signal) {
-    const pageSize = 100;
-    const page = 0;
-    let url;
-    const user = self.ctx.currentUser;
-    if (user && user.authority === 'CUSTOMER_USER') {
-        const customerId = (user.customerId && user.customerId.id) ? user.customerId.id : user.customerId;
-        if (!customerId) throw new Error('顧客IDが見つかりません');
-        url = `/api/customer/${customerId}/deviceInfos?pageSize=${pageSize}&page=${page}&type=${encodeURIComponent(deviceType)}`;
-    } else {
-        url = `/api/tenant/deviceInfos?pageSize=${pageSize}&page=${page}&type=${encodeURIComponent(deviceType)}`;
-    }
-    const r = await apiGet(url, signal);
-    const data = r.data || [];
-    return data
-        .filter(x => x.type === deviceType)
-        .map(x => ({
-            id: (x.id && (x.id.id || x.id)) || x.id,
-            name: x.name || x.label || x.deviceName || '(名称未設定)',
-            label: x.label || '',
-            type: x.type
-        }));
-}
-
-function saveSelection(type, deviceId, deviceName, deviceLabel, mode) {
-    try {
-        const selection = {
-            deviceType: type,
-            deviceId,
-            deviceName,
-            deviceLabel: deviceLabel || deviceName,
-            mode,
-            timestamp: Date.now()
-        };
-        localStorage.setItem('store_type_selection', JSON.stringify(selection));
-        self.lastSelection = selection;
-    } catch (e) { }
-}
-
-function restoreSelection() {
-    try {
-        const saved = localStorage.getItem('store_type_selection');
-        if (saved) return JSON.parse(saved);
-    } catch (e) { }
-    return null;
-}
-
-function persistSelection(options) {
-    const opts = options || {};
-    const selectedType = self.typeSelect.value;
-    const selectedDeviceId = self.deviceSelect.value;
-    const selectedDeviceName =
-        self.deviceSelect.options[self.deviceSelect.selectedIndex]?.text || '';
-
-    if (opts.silentState) {
-        if (!opts.skipStorage) {
-            const mode = selectedDeviceId === '__ALL__' ? 'ALL' : (selectedDeviceId ? 'SINGLE' : 'NONE');
-            saveSelection(selectedType, selectedDeviceId, selectedDeviceName, '', mode);
-        }
-        return;
-    }
-
-    if (!self.ctx || !self.ctx.stateController) return;
-    if (self.isUpdatingFromState) return;
-    if (self.isLoadingOptions) return;
-
-    if (self.persistTimer) clearTimeout(self.persistTimer);
-    self.persistTimer = setTimeout(() => {
-        persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName);
-    }, 150);
-}
-
-async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName) {
-    try {
-        if (selectedDeviceId === '__ALL__') {
-            const devices = self.currentDevices || [];
-            const entityList = devices.map(d => ({ entityType: 'DEVICE', id: d.id }));
-            const stateParams = {
-                entities: entityList,
-                entityIds: entityList,
-                entityId: entityList.length ? { entityType: 'DEVICE', id: entityList[0].id } : null,
-                entityType: 'DEVICE',
-                id: entityList.length ? entityList[0].id : null,
-                selectedDeviceMode: 'ALL',
-                selectedDeviceType: selectedType,
-                selectedDeviceId: '__ALL__',
-                selectedDeviceName: selectedDeviceName,
-                name: selectedDeviceName,
-                label: selectedDeviceName,
-                type: selectedType,
-                mode: 'ALL',
-                count: entityList.length
-            };
-            self.ctx.stateController.updateState(null, stateParams, true);
-            self.selected = { deviceType: selectedType, deviceId: '__ALL__', deviceName: selectedDeviceName, mode: 'ALL', count: entityList.length };
-            saveSelection(selectedType, '__ALL__', selectedDeviceName, '', 'ALL');
-            return;
-        }
-
-        if (selectedDeviceId) {
-            const stateParams = {
-                entityType: 'DEVICE',
-                id: selectedDeviceId,
-                entityId: { entityType: 'DEVICE', id: selectedDeviceId },
-                name: selectedDeviceName,
-                label: selectedDeviceName,
-                selectedDeviceMode: 'SINGLE',
-                selectedDeviceType: selectedType,
-                selectedDeviceId: selectedDeviceId,
-                selectedDeviceName: selectedDeviceName,
-                mode: 'SINGLE',
-                type: selectedType
-            };
-
-            let selectedDeviceLabel = '';
-            try { selectedDeviceLabel = await fetchDeviceLabel(selectedDeviceId); } catch (e) { }
-            stateParams.selectedDeviceLabel = selectedDeviceLabel;
-
-            self.ctx.stateController.updateState(null, stateParams, true);
-            self.selected = {
-                deviceType: selectedType,
-                deviceId: selectedDeviceId,
-                deviceName: selectedDeviceName,
-                deviceLabel: selectedDeviceLabel,
-                entity: { entityType: 'DEVICE', id: selectedDeviceId },
-                mode: 'SINGLE'
-            };
-            saveSelection(selectedType, selectedDeviceId, selectedDeviceName, selectedDeviceLabel, 'SINGLE');
-            return;
-        }
-
-        const stateParams = {
-            entityType: null,
-            id: null,
-            name: null,
-            label: null,
-            entities: null,
-            selectedDeviceMode: 'NONE',
-            selectedDeviceType: selectedType || null,
-            selectedDeviceId: null,
-            selectedDeviceName: null,
-            mode: 'NONE',
-            type: selectedType || null,
-            count: 0
-        };
-        self.ctx.stateController.updateState(null, stateParams, true);
-        self.selected = null;
-        localStorage.removeItem('store_type_selection');
-    } catch (e) { }
-}
-
-// -------- Custom dropdown (same as EN) --------
+// -------- Native dropdown open helper --------
 function ensureStoreDropdownManager() {
     var topWin = window.top || window;
     if (topWin.__TB_STORE_DD__) return topWin.__TB_STORE_DD__;
@@ -580,33 +416,62 @@ function ensureStoreDropdownManager() {
         },
         position: function (anchorEl) {
             if (!this.dropdown || !anchorEl) return;
+
+            // Get anchor rect in iframe coordinates
             var a = anchorEl.getBoundingClientRect();
+
+            // Get iframe position in top window
             var fe = window.frameElement;
             var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
-            var scaleX = 1;
-            var scaleY = 1;
-            if (fe) {
-                var feW = fe.clientWidth || fe.offsetWidth || f.width || 0;
-                var feH = fe.clientHeight || fe.offsetHeight || f.height || 0;
-                if (feW && f.width) scaleX = f.width / feW;
-                if (feH && f.height) scaleY = f.height / feH;
-            }
-            var vv = (window.top || window).visualViewport;
-            var vvLeft = vv && typeof vv.offsetLeft === 'number' ? vv.offsetLeft : 0;
-            var vvTop = vv && typeof vv.offsetTop === 'number' ? vv.offsetTop : 0;
+
+            // Account for iframe border (clientLeft/clientTop)
+            var iframeBorderLeft = fe ? (fe.clientLeft || 0) : 0;
+            var iframeBorderTop = fe ? (fe.clientTop || 0) : 0;
+
+            // DEBUG: Log to diagnose offset issue
+            console.log('[DD Position]', {
+                anchor: { left: a.left, top: a.top, bottom: a.bottom, width: a.width },
+                iframe: { left: f.left, top: f.top },
+                iframeBorder: { left: iframeBorderLeft, top: iframeBorderTop },
+                calculated: { left: f.left + a.left + iframeBorderLeft, top: f.top + a.bottom + iframeBorderTop }
+            });
+
+            // Convert iframe coordinates to top window coordinates
+            // Add iframe border offset to account for iframe's border
             var gap = 6;
-            var left = f.left + (a.left * scaleX) + vvLeft;
-            var top = f.top + (a.bottom * scaleY) + vvTop + gap;
+            var left = f.left + a.left + iframeBorderLeft;
+            var top = f.top + a.bottom + iframeBorderTop + gap;
+
+            // Get viewport dimensions
             var vw = (window.top || window).innerWidth;
             var vh = (window.top || window).innerHeight;
+
             var dd = this.dropdown;
-            var ddW = dd.offsetWidth || 240;
+            
+            // Set width FIRST to match anchor width (before measuring offsetWidth)
+            var dropdownWidth = Math.max(160, a.width);
+            dd.style.width = dropdownWidth + 'px';
+            
+            // Now measure actual dimensions after width is set
+            var ddW = dd.offsetWidth || dropdownWidth;
             var ddH = dd.offsetHeight || 200;
-            if (left + ddW + gap > vw) left = Math.max(gap, vw - ddW - gap);
-            if (top + ddH + gap > vh) top = Math.max(gap, f.top + a.top - ddH - gap);
-            dd.style.left = Math.max(gap, left) + 'px';
-            dd.style.top = Math.max(gap, top) + 'px';
-            dd.style.width = Math.max(160, a.width * scaleX) + 'px';
+
+            // DON'T shift left if dropdown is wide - keep aligned with anchor
+            // Only adjust if dropdown would go completely off-screen
+            var finalLeft = left;
+            var finalTop = top;
+            
+            // If dropdown goes off right edge, allow it to extend or scroll
+            // Don't shift it left as that breaks alignment with anchor
+            
+            // If dropdown goes off bottom, flip it above anchor
+            if (top + ddH + gap > vh) {
+                finalTop = Math.max(gap, f.top + a.top + iframeBorderTop - ddH - gap);
+            }
+
+            // Set position
+            dd.style.left = Math.max(gap, finalLeft) + 'px';
+            dd.style.top = Math.max(gap, finalTop) + 'px';
         },
         close: function () {
             if (!this.overlay) return;
@@ -633,16 +498,30 @@ function wireCustomDropdowns() {
     if (!self.rootEl || self._dropdownHandler) return;
     var mgr = ensureStoreDropdownManager();
     self._dropdownHandler = function (e) {
-        var storeCard = e.target.closest('.store-card');
+        // Check device card first to ensure correct priority
         var deviceCard = e.target.closest('.device-card');
-        if (storeCard && self.typeSelect) {
-            e.stopPropagation();
-            mgr.open(self.typeSelect, storeCard, 'red');
-            return;
-        }
+        var storeCard = e.target.closest('.store-card');
+
+        console.log('[Click Handler]', {
+            target: e.target.tagName,
+            hasDevice: !!deviceCard,
+            hasStore: !!storeCard
+        });
+
+        // Device card takes priority
         if (deviceCard && self.deviceSelect) {
             e.stopPropagation();
+            console.log('[Opening Device DD]', deviceCard.className);
             mgr.open(self.deviceSelect, deviceCard, 'blue');
+            return;
+        }
+
+        // Then check store card
+        if (storeCard && self.typeSelect) {
+            e.stopPropagation();
+            console.log('[Opening Store DD]', storeCard.className);
+            mgr.open(self.typeSelect, storeCard, 'red');
+            return;
         }
     };
     self.rootEl.addEventListener('click', self._dropdownHandler);
@@ -654,3 +533,445 @@ function teardownCustomDropdowns() {
         self._dropdownHandler = null;
     }
 }
+
+function fillSelect(selectEl, items, placeholder) {
+    selectEl.innerHTML = '';
+
+    // Only add placeholder if provided
+    if (placeholder) {
+        const ph = document.createElement('option');
+        ph.value = '';
+        ph.textContent = placeholder;
+        selectEl.appendChild(ph);
+    }
+
+    items.forEach(it => {
+        const opt = document.createElement('option');
+        if (typeof it === 'string') {
+            opt.value = it;
+            opt.textContent = it;
+        } else {
+            opt.value = it.value;
+            opt.textContent = it.label;
+        }
+        selectEl.appendChild(opt);
+    });
+    // native select: no custom menu build
+}
+
+function setStatus(msg) {
+    self.statusEl.textContent = msg || '';
+}
+
+function getToken() {
+    const jwtToken = localStorage.getItem('jwt_token');
+    const token = localStorage.getItem('token');
+    const result = jwtToken || token || '';
+
+    // //console.log('[store_type] Token lookup:', {
+    //   jwt_token: jwtToken ? 'found' : 'not found',
+    //   token: token ? 'found' : 'not found',
+    //   using: result ? 'token available' : 'NO TOKEN'
+    //});
+
+    return result;
+}
+
+async function apiGet(url, signal) {
+    const token = getToken();
+    // //console.log('[store_type] API GET:', url);
+
+    const res = await fetch(url, {
+        method: 'GET',
+        signal,
+        headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'X-Authorization': 'Bearer ' + token } : {})
+        }
+    });
+
+    // //console.log('[store_type] API Response:', {
+    //   url: url,
+    //   status: res.status,
+    //  ok: res.ok
+    //});
+
+    if (!res.ok) {
+        const errorText = await res.text();
+        // //console.error('[store_type] API Error:', errorText);
+        throw new Error(`HTTP ${res.status} when GET ${url}: ${errorText}`);
+    }
+
+    return res.json();
+}
+
+async function fetchDeviceTypes() {
+    const user = self.ctx.currentUser;
+    // //console.log('[store_type] Fetching device types. User authority:', user ? user.authority : 'unknown');
+
+    // CUSTOMER_USER: Fetch all assigned devices and extract unique types
+    if (user && user.authority === 'CUSTOMER_USER') {
+        const customerId = (user.customerId && user.customerId.id) ? user.customerId.id : user.customerId;
+        if (!customerId) {
+            // //console.error('[store_type] ❌ Customer ID missing for CUSTOMER_USER');
+            return [];
+        }
+
+        const pageSize = 1000; // Fetch large batch to get all types
+        const url = `/api/customer/${customerId}/deviceInfos?pageSize=${pageSize}&page=0`;
+        // //console.log('[store_type] Customer User: Fetching all devices to extract types from:', url);
+
+        try {
+            if (self.typeAbort) {
+                try { self.typeAbort.abort(); } catch (e) { }
+            }
+            const mySeq = ++typesReqSeq;
+            self.typeAbort = new AbortController();
+            const r = await apiGet(url, self.typeAbort.signal);
+            if (mySeq !== typesReqSeq) return [];
+            const data = r.data || [];
+            // //console.log(`[store_type] Fetched ${data.length} devices for customer.`);
+
+            // Extract unique types
+            const uniqueTypes = [...new Set(data.map(d => d.type))].filter(Boolean).sort();
+            // //console.log('[store_type] Extracted unique types from customer devices:', uniqueTypes);
+            return uniqueTypes;
+        } catch (e) {
+            // //console.error('[store_type] Error fetching customer devices for types:', e);
+            return [];
+        }
+    }
+
+    // TENANT_ADMIN: Fetch all device types from system
+    // //console.log('[store_type] Tenant Admin: Fetching all device types from /api/device/types');
+    if (self.typeAbort) {
+        try { self.typeAbort.abort(); } catch (e) { }
+    }
+    const mySeq = ++typesReqSeq;
+    self.typeAbort = new AbortController();
+    const r = await apiGet('/api/device/types', self.typeAbort.signal);
+    if (mySeq !== typesReqSeq) return [];
+    // //console.log('[store_type] Raw response from /api/device/types:', r);
+
+    let types = Array.isArray(r) ? r : (r.deviceTypes || []);
+
+    if (types.length > 0 && typeof types[0] === 'object') {
+        types = types.map(t => {
+            const typeName = t.type || t.name || t.deviceType || t.label || JSON.stringify(t);
+            return typeName;
+        });
+    }
+
+    return types;
+}
+
+async function fetchDevices(deviceType, signal) {
+    const pageSize = 100;
+    const page = 0;
+
+    let url;
+    const user = self.ctx.currentUser;
+    // //console.log('[store_type] Current user authority:', user ? user.authority : 'unknown');
+
+    if (user && user.authority === 'CUSTOMER_USER') {
+        // Handle both object {id: '...'} and string formats
+        const customerId = (user.customerId && user.customerId.id) ? user.customerId.id : user.customerId;
+
+        if (!customerId) {
+            // //console.error('[store_type] ❌ Could not find customerId for CUSTOMER_USER:', user);
+            throw new Error('顧客IDが見つかりません');
+        }
+
+        url = `/api/customer/${customerId}/deviceInfos?pageSize=${pageSize}&page=${page}&type=${encodeURIComponent(deviceType)}`;
+        // //console.log('[store_type] Using Customer API for device fetch. CustomerId:', customerId);
+    } else {
+        url = `/api/tenant/deviceInfos?pageSize=${pageSize}&page=${page}&type=${encodeURIComponent(deviceType)}`;
+        // //console.log('[store_type] Using Tenant API for device fetch');
+    }
+    // //console.log('[store_type] Fetching devices from:', url);
+    // //console.log('[store_type] Filtering by device type:', deviceType);
+
+    const r = await apiGet(url, signal);
+    // //console.log('[store_type] Raw response from deviceInfos:', r);
+
+    const data = r.data || [];
+    // //console.log('[store_type] Extracted device data count:', data.length);
+
+    if (data.length > 0) {
+        const deviceTypes = data.map(d => d.type).filter((v, i, a) => a.indexOf(v) === i);
+        // //console.log('[store_type] Device types in response:', deviceTypes);
+        // //console.log('[store_type] Expected type:', deviceType);
+
+        const allMatchExpected = data.every(d => d.type === deviceType);
+        if (!allMatchExpected) {
+            // //console.warn('[store_type] WARNING: Response contains devices of different types!');
+            // //console.warn('[store_type] This means the API is not filtering by type parameter.');
+            // //console.warn('[store_type] Devices will be filtered client-side.');
+        }
+    }
+
+    return data
+        .filter(x => x.type === deviceType)
+        .map(x => ({
+            id: (x.id && (x.id.id || x.id)) || x.id,
+            name: x.name || x.label || x.deviceName || '(名称未設定)',
+            label: x.label || '',  // Note: deviceInfos API may not return label
+            type: x.type
+        }));
+}
+
+// Fetch device label from device detail API
+async function fetchDeviceLabel(deviceId) {
+    try {
+        //console.log('[store_type] Fetching device label for:', deviceId);
+        const device = await apiGet(`/api/device/${deviceId}`);
+        //console.log('[store_type] Device API response:', device);
+        //console.log('[store_type] Device label field:', device.label);
+        return device.label || '';
+    } catch (e) {
+        //console.warn('[store_type] Failed to fetch device label:', e);
+        return '';
+    }
+}
+
+// ===== localStorage helpers =====
+const STORAGE_KEY = 'store_type_selection';
+
+function saveSelection(type, deviceId, deviceName, deviceLabel, mode) {
+    try {
+        const selection = {
+            deviceType: type,
+            deviceId: deviceId,
+            deviceName: deviceName,
+            deviceLabel: deviceLabel || deviceName,
+            mode: mode,
+            timestamp: Date.now()
+        };
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+        self.lastSelection = selection;
+        // //console.log('[store_type] 💾 Saved to localStorage:', selection);
+    } catch (e) {
+        // //console.warn('[store_type] Failed to save to localStorage:', e);
+    }
+}
+
+function restoreSelection() {
+    try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+            const selection = JSON.parse(saved);
+            // //console.log('[store_type] 📦 Restored from localStorage:', selection);
+            return selection;
+        }
+    } catch (e) {
+        // //console.warn('[store_type] Failed to restore from localStorage:', e);
+    }
+    return null;
+}
+
+function persistSelection(options) {
+    const opts = options || {};
+    const selectedType = self.typeSelect.value;
+    const selectedDeviceId = self.deviceSelect.value;
+    const selectedDeviceName =
+        self.deviceSelect.options[self.deviceSelect.selectedIndex]?.text || '';
+
+    // //console.log('[store_type] 🔍 persistSelection called:', {
+    //    type: selectedType,
+    //   deviceId: selectedDeviceId,
+    //   deviceName: selectedDeviceName
+    //});
+
+    if (opts.silentState) {
+        if (!opts.skipStorage) {
+            const mode = selectedDeviceId === '__ALL__' ? 'ALL' : (selectedDeviceId ? 'SINGLE' : 'NONE');
+            saveSelection(selectedType, selectedDeviceId, selectedDeviceName, '', mode);
+        }
+        return;
+    }
+
+    if (!self.ctx || !self.ctx.stateController) {
+        return;
+    }
+
+    if (self.isUpdatingFromState) {
+        return;
+    }
+    if (self.isLoadingOptions) {
+        return;
+    }
+
+    // Call async version
+    if (self.persistTimer) clearTimeout(self.persistTimer);
+    self.persistTimer = setTimeout(() => {
+        persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName);
+    }, 150);
+}
+
+async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName) {
+    try {
+        // Note: selectedDeviceType is already included in the 'default' state params below
+        // No need to update it separately to avoid multiple state change events
+
+        // ========= ALL DEVICES =========
+        if (selectedDeviceId === '__ALL__') {
+            // //console.log('[store_type] 📋 全デバイス selected for type:', selectedType);
+
+            const devices = self.currentDevices || [];
+            const entityList = devices.map(d => ({
+                entityType: 'DEVICE',
+                id: d.id
+            }));
+
+            // ✅ ALL params in ONE object for 'default' state
+            // For ALL mode, we include both entity list AND custom params
+            const stateParams = {
+                // For timeseries widgets - multiple formats for compatibility
+                entities: entityList,
+                entityIds: entityList, // Array format for entity alias
+                entityId: entityList.length > 0 ? { entityType: 'DEVICE', id: entityList[0].id } : null,
+
+                // Entity info (first entity as fallback, or empty)
+                entityType: 'DEVICE',
+                id: entityList.length > 0 ? entityList[0].id : null,
+
+                // Custom params (for static widgets - read via getStateParams())
+                selectedDeviceMode: 'ALL',
+                selectedDeviceType: selectedType,
+                selectedDeviceId: '__ALL__',
+                selectedDeviceName: selectedDeviceName,
+
+                // Additional info
+                name: selectedDeviceName,
+                label: selectedDeviceName,
+                type: selectedType,
+                mode: 'ALL',
+                count: entityList.length
+            };
+
+            // //console.log('[store_type] 🔄 Updating current state with ALL params (ALL mode):', stateParams);
+
+            // ✅ Single updateState call with ALL params (null = current state)
+            self.ctx.stateController.updateState(null, stateParams, true);
+
+            self.selected = {
+                deviceType: selectedType,
+                deviceId: '__ALL__',
+                deviceName: selectedDeviceName,
+                mode: 'ALL',
+                count: entityList.length
+            };
+
+            // ✅ Save to localStorage for cross-state sync
+            saveSelection(selectedType, '__ALL__', selectedDeviceName, '', 'ALL');
+
+            // //console.log('[store_type] ✅ 全デバイス mode activated');
+
+            return;
+        }
+
+        // ========= SINGLE DEVICE =========
+        if (selectedDeviceId) {
+            //console.log('[store_type] ➡️ Entering SINGLE device block, deviceId:', selectedDeviceId);
+
+            // ✅ ALL params in ONE object for 'default' state
+            // - entityType + id + entityId: Required for timeseries widgets (entity alias binding)
+            // - selectedDeviceMode/Id/Name/Type: Required for static widgets (via getStateParams())
+            const stateParams = {
+                // Entity info (for timeseries widgets - entity alias may look for these in different formats)
+                entityType: 'DEVICE',
+                id: selectedDeviceId,
+                entityId: { entityType: 'DEVICE', id: selectedDeviceId }, // Nested format for entity alias
+                name: selectedDeviceName,
+                label: selectedDeviceName,
+
+                // Custom params (for static widgets - read via getStateParams())
+                selectedDeviceMode: 'SINGLE',
+                selectedDeviceType: selectedType,
+                selectedDeviceId: selectedDeviceId,
+                selectedDeviceName: selectedDeviceName,
+
+                // Mode shorthand
+                mode: 'SINGLE',
+                type: selectedType
+            };
+
+            // //console.log('[store_type] 🔄 Updating current state with ALL params:', stateParams);
+
+            // Fetch actual device label from API
+            let selectedDeviceLabel = '';
+            try {
+                selectedDeviceLabel = await fetchDeviceLabel(selectedDeviceId);
+                //console.log('[store_type] Fetched device label:', selectedDeviceLabel);
+            } catch (e) {
+                //console.warn('[store_type] Could not fetch device label');
+            }
+
+            // Update stateParams with label
+            stateParams.selectedDeviceLabel = selectedDeviceLabel;
+
+            // ✅ Single updateState call with ALL params (null = current state)
+            self.ctx.stateController.updateState(null, stateParams, true);
+
+            // Update internal state
+            self.selected = {
+                deviceType: selectedType,
+                deviceId: selectedDeviceId,
+                deviceName: selectedDeviceName,
+                deviceLabel: selectedDeviceLabel,
+                entity: { entityType: 'DEVICE', id: selectedDeviceId },
+                mode: 'SINGLE'
+            };
+
+            // ✅ Save to localStorage for cross-state sync
+            saveSelection(selectedType, selectedDeviceId, selectedDeviceName, selectedDeviceLabel, 'SINGLE');
+
+            // //console.log('[store_type] ✅ Single device mode activated');
+            return;
+        } else {
+            // //console.warn('[store_type] ⚠️ selectedDeviceId is empty or null');
+        }
+
+
+
+        // ========= NO SELECTION =========
+        // //console.warn('[store_type] No device selected. Clearing related states.');
+
+        // ✅ ALL params in ONE object - set to null/NONE for clearing
+        const stateParams = {
+            entityType: null,
+            id: null,
+            name: null,
+            label: null,
+            entities: null,
+
+            selectedDeviceMode: 'NONE',
+            selectedDeviceType: selectedType || null,
+            selectedDeviceId: null,
+            selectedDeviceName: null,
+
+            mode: 'NONE',
+            type: selectedType || null,
+            count: 0
+        };
+
+        // //console.log('[store_type] 🔄 Updating current state with NONE params');
+        self.ctx.stateController.updateState(null, stateParams, true);
+
+        self.selected = null;
+
+        // ✅ Clear localStorage
+        localStorage.removeItem(STORAGE_KEY);
+        // //console.log('[store_type] 🗑️ Cleared localStorage');
+
+    } catch (e) {
+        // //console.error('[store_type] Error updating state:', e);
+    }
+}
+
+
+
+/** boilerplate */
+// self.onDestroy is already defined at the top
+self.onDataUpdated = function () { };
+self.onResize = function () { };

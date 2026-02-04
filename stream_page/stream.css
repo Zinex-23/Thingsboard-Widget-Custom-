@@ -1,0 +1,21 @@
+.tb-config-merge {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.tb-config-title {
+  font-size: 18px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.tb-config-desc {
+  font-size: 14px;
+  color: #777;
+}

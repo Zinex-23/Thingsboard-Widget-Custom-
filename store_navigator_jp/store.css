@@ -4,6 +4,7 @@
     height: 100%;
     padding: 12px;
     background: transparent;
+    /* No background for container */
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     box-sizing: border-box;
     display: flex;
@@ -11,6 +12,7 @@
     justify-content: center;
     font-size: 14px;
     color: #111827;
+    overflow: visible;
 }
 
 /* ===== Cards Container ===== */
@@ -19,11 +21,13 @@
     gap: 16px;
     width: 100%;
     align-items: center;
+    overflow: visible;
 }
 
 /* ===== Card ===== */
 .custom-select-card {
     position: relative;
+    /* For hidden select overlay */
     background: #ffffff;
     border: 1px solid #E5E7EB;
     border-radius: 12px;
@@ -34,12 +38,21 @@
     transition: all 0.2s ease;
     cursor: pointer;
     min-width: 0;
-    --select-pad-left: 68px;
-    --select-pad-right: 44px;
+    /* allows flex items to shrink below content size */
+    --select-pad-left: 68px; /* align dropdown text with card-value */
+    --select-pad-right: 44px; /* align with arrow area */
+    overflow: visible;
 }
 
-.store-card { flex: 4; }
-.device-card { flex: 6; }
+/* Specific Card Widths/Flex */
+.store-card {
+    flex: 4;
+    /* Assign ratio similar to previous or equal */
+}
+
+.device-card {
+    flex: 6;
+}
 
 .custom-select-card:hover {
     border-color: #D1D5DB;
@@ -56,8 +69,16 @@
     justify-content: center;
     flex-shrink: 0;
 }
-.store-icon-bg { background-color: #FEF2F2; }
-.device-icon-bg { background-color: #EFF6FF; }
+
+.store-icon-bg {
+    background-color: #FEF2F2;
+    /* Red-50 */
+}
+
+.device-icon-bg {
+    background-color: #EFF6FF;
+    /* Blue-50 */
+}
 
 /* ===== Content ===== */
 .card-content {
@@ -66,19 +87,25 @@
     margin-left: 12px;
     flex-grow: 1;
     overflow: hidden;
+    /* For text truncation */
     margin-right: 8px;
 }
+
 .card-label {
     font-size: 11px;
     color: #6B7280;
+    /* Gray-500 */
     margin-bottom: 2px;
     text-transform: none;
+    /* Reset uppercase if any */
     font-weight: 500;
 }
+
 .card-value {
     font-size: 15px;
     font-weight: 700;
     color: #111827;
+    /* Gray-900 */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -96,7 +123,7 @@
     stroke: #3B82F6;
 }
 
-/* ===== Hidden Select (native) ===== */
+/* ===== Hidden Select ===== */
 .hidden-select {
     position: absolute;
     top: 0;
@@ -104,26 +131,35 @@
     width: 100%;
     height: 100%;
     opacity: 0;
-    cursor: pointer;
+    cursor: default;
     -webkit-appearance: none;
     appearance: none;
-    z-index: 10;
-    pointer-events: none;
+    z-index: 1;
+    pointer-events: none; /* dùng dropdown custom */
     border-radius: 12px;
     padding-left: var(--select-pad-left);
     padding-right: var(--select-pad-right);
 }
+
 .hidden-select option {
     color: #111827;
     background: #fff;
+    border-radius: 10px;
+    padding: 10px 14px;
 }
+
+/* (giữ lại select native nên bỏ custom dropdown) */
 
 /* ===== Status ===== */
 .status-container {
     margin-top: 8px;
     display: none;
 }
-.status-container:not(:empty) { display: block; }
+
+.status-container:not(:empty) {
+    display: block;
+}
+
 .status-text {
     font-size: 0.8em;
     color: #6B7280;
@@ -136,6 +172,7 @@
         flex-direction: column;
         align-items: stretch;
     }
+
     .store-card,
     .device-card {
         flex: auto;
