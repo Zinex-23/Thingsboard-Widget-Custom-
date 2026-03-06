@@ -22,6 +22,9 @@ self.onInit = function () {
     const selectEl = $c.find('.cam-dd')[0];
     const roiSwitchEl = $c.find('.roi-switch')[0];
     const roiBtns = Array.from($c.find('.roi-btn'));
+    const flowLegendEl = $c.find('.flow-legend')[0];
+    const legendPassEl = $c.find('.legend-pass-label')[0];
+    const legendOutEl = $c.find('.legend-out-label')[0];
     const toastCenter = $c.find('.toast-center')[0];
     const roiHintEl = $c.find('.roi-hint')[0];
 
@@ -75,6 +78,10 @@ self.onInit = function () {
             undo: 'Undo',
             clear: 'Clear',
             reload: 'Reload',
+            tip_save: 'Save',
+            tip_undo: 'Undo',
+            tip_clear: 'Delete',
+            tip_reload: 'Reload',
             camera: 'Camera',
             detect: 'Detect',
             region1: 'Region1',
@@ -93,14 +100,20 @@ self.onInit = function () {
             err_need_4_points: 'Please select exactly 4 points to create ROI.',
             err_need_in_out: 'Please select at least one IN_OUT line.',
             err_invalid_stat_cfg: 'Invalid statistic_config format.',
-            hint_tablet: 'Tap 4 points to draw a zone. Tap one edge to enable counting on that line.',
-            hint_edge_entry: 'Pass'
+            hint_tablet: 'Draw ROI with 4 points, then tap the red edge to toggle counting line.',
+            hint_edge: 'Select Detect/Region1/Region2, then tap points to draw ROI.',
+            legend_pass: 'Pass',
+            legend_out: 'Exit'
         },
         ja: {
             save: '保存',
             undo: '元に戻す',
             clear: 'クリア',
             reload: '再読み込み',
+            tip_save: '保存',
+            tip_undo: '元に戻す',
+            tip_clear: '削除',
+            tip_reload: '再読み込み',
             camera: 'カメラ',
             detect: '検出',
             region1: '領域1',
@@ -119,8 +132,10 @@ self.onInit = function () {
             err_need_4_points: 'ROIを作成するには4点を選択してください。',
             err_need_in_out: 'IN_OUTの線を1本以上選択してください。',
             err_invalid_stat_cfg: 'statistic_configの形式が不正です。',
-            hint_tablet: '4点をタップしてゾーンを作成します。1つの辺をタップしてカウントを有効にします。',
-            hint_edge_entry: '通過'
+            hint_tablet: '4点でROIを描画し、赤い辺をタップしてカウント線を切り替えます。',
+            hint_edge: 'Detect/Region1/Region2を選択し、点をタップしてROIを描画します。',
+            legend_pass: '通過',
+            legend_out: '退出'
         }
     };
 
@@ -167,9 +182,15 @@ self.onInit = function () {
         if (btnUndoEl) btnUndoEl.textContent = t('undo');
         if (btnClearEl) btnClearEl.textContent = t('clear');
         if (btnReloadEl) btnReloadEl.textContent = t('reload');
+        if (btnSaveEl) { btnSaveEl.setAttribute('data-tip', t('tip_save')); btnSaveEl.setAttribute('aria-label', t('tip_save')); }
+        if (btnUndoEl) { btnUndoEl.setAttribute('data-tip', t('tip_undo')); btnUndoEl.setAttribute('aria-label', t('tip_undo')); }
+        if (btnClearEl) { btnClearEl.setAttribute('data-tip', t('tip_clear')); btnClearEl.setAttribute('aria-label', t('tip_clear')); }
+        if (btnReloadEl) { btnReloadEl.setAttribute('data-tip', t('tip_reload')); btnReloadEl.setAttribute('aria-label', t('tip_reload')); }
 
         if (camLabelEl) camLabelEl.textContent = t('camera');
         if (loadingTextEl) loadingTextEl.textContent = t('loading');
+        if (legendPassEl) legendPassEl.textContent = t('legend_pass');
+        if (legendOutEl) legendOutEl.textContent = t('legend_out');
         updateHint();
 
         for (let i = 0; i < roiBtns.length; i++) {
@@ -208,11 +229,23 @@ self.onInit = function () {
         if (!roiHintEl) return;
         if (self._mode === 'tablet') {
             roiHintEl.classList.remove('is-edge');
-            roiHintEl.textContent = t('hint_tablet');
+            roiHintEl.innerHTML = `
+                <span class="hint-text">${t('hint_tablet')}</span>
+                <span class="hint-chips">
+                    <span class="hint-chip flow-item flow-pass">
+                        <span class="flow-arrow"></span>
+                        <span>${t('legend_pass')}</span>
+                    </span>
+                    <span class="hint-chip flow-item flow-out">
+                        <span class="flow-arrow"></span>
+                        <span>${t('legend_out')}</span>
+                    </span>
+                </span>
+            `;
             roiHintEl.style.display = '';
         } else if (self._mode === 'edge') {
             roiHintEl.classList.add('is-edge');
-            roiHintEl.innerHTML = `<span class="hint-square square-green"></span><span class="hint-arrow">→</span><span class="hint-square square-red"></span> ${t('hint_edge_entry')}`;
+            roiHintEl.textContent = t('hint_edge');
             roiHintEl.style.display = '';
         } else {
             roiHintEl.style.display = 'none';
@@ -379,6 +412,157 @@ self.onInit = function () {
         return ox * ox + oy * oy;
     }
 
+    function pointInPolygon(px, py, polyPts) {
+        if (!polyPts || polyPts.length < 3) return false;
+        let inside = false;
+        for (let i = 0, j = polyPts.length - 1; i < polyPts.length; j = i++) {
+            const xi = polyPts[i].x;
+            const yi = polyPts[i].y;
+            const xj = polyPts[j].x;
+            const yj = polyPts[j].y;
+            const den = (yj - yi) || 1e-9;
+            const crossX = ((xj - xi) * (py - yi)) / den + xi;
+            const intersects = ((yi > py) !== (yj > py)) && (px < crossX);
+            if (intersects) inside = !inside;
+        }
+        return inside;
+    }
+
+    function getInwardNormalForEdge(p1, p2, polyCanvasPts) {
+        const ex = p2.x - p1.x;
+        const ey = p2.y - p1.y;
+        const edgeLen = Math.hypot(ex, ey);
+        if (edgeLen < 1e-6) return null;
+
+        const nLeft = { x: -ey / edgeLen, y: ex / edgeLen };
+        const nRight = { x: -nLeft.x, y: -nLeft.y };
+        const mx = (p1.x + p2.x) * 0.5;
+        const my = (p1.y + p2.y) * 0.5;
+        const probe = Math.max(10, Math.min(24, edgeLen * 0.16));
+
+        const leftInside = pointInPolygon(mx + nLeft.x * probe, my + nLeft.y * probe, polyCanvasPts);
+        const rightInside = pointInPolygon(mx + nRight.x * probe, my + nRight.y * probe, polyCanvasPts);
+        if (leftInside !== rightInside) return leftInside ? nLeft : nRight;
+
+        // Fallback for ambiguous boundaries: choose normal toward polygon centroid.
+        let cx = 0;
+        let cy = 0;
+        for (let i = 0; i < polyCanvasPts.length; i++) {
+            cx += polyCanvasPts[i].x;
+            cy += polyCanvasPts[i].y;
+        }
+        cx /= polyCanvasPts.length || 1;
+        cy /= polyCanvasPts.length || 1;
+        const dotLeft = (cx - mx) * nLeft.x + (cy - my) * nLeft.y;
+        const dotRight = (cx - mx) * nRight.x + (cy - my) * nRight.y;
+        return (dotLeft >= dotRight) ? nLeft : nRight;
+    }
+
+    function drawFlowArrow(cx, cy, dirX, dirY, style, geom) {
+        const mag = Math.hypot(dirX, dirY);
+        if (mag < 1e-6) return;
+
+        const ux = dirX / mag;
+        const uy = dirY / mag;
+        const len = geom.len;
+        const shaftH = geom.shaftH;
+        const headL = geom.headL;
+
+        const halfShaft = shaftH * 0.5;
+        const headHalf = Math.max(halfShaft + 2, shaftH * 0.72);
+        const xStart = -len * 0.5;
+        const xHeadBase = len * 0.5 - headL;
+        const xTip = len * 0.5;
+
+        g.save();
+        g.translate(cx, cy);
+        g.rotate(Math.atan2(uy, ux));
+
+        g.shadowColor = 'rgba(15,23,42,0.30)';
+        g.shadowBlur = 8;
+        g.shadowOffsetY = 2;
+
+        const grad = g.createLinearGradient(xStart, 0, xTip, 0);
+        grad.addColorStop(0, style.fillA || style.fill);
+        grad.addColorStop(1, style.fillB || style.fill);
+
+        g.fillStyle = grad;
+        g.strokeStyle = style.stroke;
+        g.lineWidth = 1.7;
+
+        g.beginPath();
+        g.moveTo(xStart, -halfShaft);
+        g.lineTo(xHeadBase, -halfShaft);
+        g.lineTo(xHeadBase, -headHalf);
+        g.lineTo(xTip, 0);
+        g.lineTo(xHeadBase, headHalf);
+        g.lineTo(xHeadBase, halfShaft);
+        g.lineTo(xStart, halfShaft);
+        g.closePath();
+        g.fill();
+        g.stroke();
+
+        g.shadowColor = 'transparent';
+        g.beginPath();
+        g.moveTo(xStart + 4, -halfShaft + 2.2);
+        g.lineTo(xHeadBase - 4, -halfShaft + 2.2);
+        g.lineTo(xHeadBase - 1.4, -1.4);
+        g.strokeStyle = 'rgba(255,255,255,0.34)';
+        g.lineWidth = 1.15;
+        g.stroke();
+
+        g.beginPath();
+        g.moveTo(xStart + 3, halfShaft - 1.8);
+        g.lineTo(xHeadBase - 3.6, halfShaft - 1.8);
+        g.strokeStyle = 'rgba(15,23,42,0.2)';
+        g.lineWidth = 1.05;
+        g.stroke();
+
+        g.restore();
+    }
+
+    function drawInOutArrowsForEdge(p1, p2, polyCanvasPts) {
+        const ex = p2.x - p1.x;
+        const ey = p2.y - p1.y;
+        const edgeLen = Math.hypot(ex, ey);
+        if (edgeLen < 24) return;
+
+        const tx = ex / edgeLen;
+        const ty = ey / edgeLen;
+        const inward = getInwardNormalForEdge(p1, p2, polyCanvasPts);
+        if (!inward) return;
+        const outward = { x: -inward.x, y: -inward.y };
+
+        const arrowLen = Math.max(58, Math.min(88, edgeLen * 0.58));
+        const shaftH = Math.max(18, Math.min(26, arrowLen * 0.34));
+        const headL = Math.max(16, Math.min(24, arrowLen * 0.34));
+        const tangentShift = Math.min(edgeLen * 0.22, arrowLen * 0.42);
+
+        const mx = (p1.x + p2.x) * 0.5;
+        const my = (p1.y + p2.y) * 0.5;
+
+        const inCenter = {
+            x: mx + tx * tangentShift,
+            y: my + ty * tangentShift
+        };
+        const outCenter = {
+            x: mx - tx * tangentShift,
+            y: my - ty * tangentShift
+        };
+
+        drawFlowArrow(inCenter.x, inCenter.y, inward.x, inward.y, {
+            fillA: 'rgba(52,211,153,0.96)',
+            fillB: 'rgba(22,163,74,0.96)',
+            stroke: '#166534'
+        }, { len: arrowLen, shaftH: shaftH, headL: headL });
+
+        drawFlowArrow(outCenter.x, outCenter.y, outward.x, outward.y, {
+            fillA: 'rgba(251,113,133,0.95)',
+            fillB: 'rgba(239,68,68,0.95)',
+            stroke: '#991b1b'
+        }, { len: arrowLen, shaftH: shaftH, headL: headL });
+    }
+
     function getEdgeIndexAtPos(ev) {
         if (!self._tabletPair || self._tabletPair.length !== 4) return null;
         const r = canvasEl.getBoundingClientRect();
@@ -424,6 +608,11 @@ self.onInit = function () {
     /* ===== Mode UI ===== */
     function applyModeUI() {
         if (camBoxEl) camBoxEl.style.display = (self._mode === 'tablet') ? 'none' : 'flex';
+        if (flowLegendEl) {
+            const showLegend = (self._mode === 'tablet' || self._mode === 'edge');
+            flowLegendEl.style.display = showLegend ? 'flex' : 'none';
+            flowLegendEl.setAttribute('data-mode', (self._mode === 'edge') ? 'edge' : 'tablet');
+        }
 
         if (self._mode === 'edge') {
             if (roiSwitchEl) roiSwitchEl.style.display = 'flex';
@@ -432,6 +621,19 @@ self.onInit = function () {
             if (roiSwitchEl) roiSwitchEl.style.display = 'none';
         }
         updateHint();
+        updateCursor();
+    }
+
+    /* ===== Cursor Management ===== */
+    function updateCursor() {
+        // Update cursor based on mode and polygon state
+        if (self._mode === 'tablet' && self._tabletPair && self._tabletPair.length === 4) {
+            // When 4 points are drawn, switch to pointer cursor for clicking edges
+            if (canvasEl) canvasEl.classList.add('can-click-edge');
+        } else {
+            // Otherwise use crosshair for drawing
+            if (canvasEl) canvasEl.classList.remove('can-click-edge');
+        }
     }
 
     function setActiveRoi(name) {
@@ -463,6 +665,9 @@ self.onInit = function () {
         } else {
             drawTabletPolygon(self._tabletPair);
         }
+
+        // Update cursor based on state
+        updateCursor();
     }
 
     function drawTabletPolygon(points) {
@@ -470,6 +675,11 @@ self.onInit = function () {
         const r = self._imgDraw;
         const baseColor = '#F44336';
         const lineColors = { in_out: '#1E88E5', base: baseColor };
+        const polyCanvasPts = points.map((p) => ({
+            x: r.offX + p.x * r.drawW,
+            y: r.offY + p.y * r.drawH
+        }));
+        const inOutEdges = [];
 
         g.save();
         g.strokeStyle = baseColor; // Red
@@ -518,6 +728,19 @@ self.onInit = function () {
                 g.moveTo(r.offX + p1.x * r.drawW, r.offY + p1.y * r.drawH);
                 g.lineTo(r.offX + p2.x * r.drawW, r.offY + p2.y * r.drawH);
                 g.stroke();
+
+                if (type === 'in_out' && points.length === 4) {
+                    inOutEdges.push({
+                        p1: { x: r.offX + p1.x * r.drawW, y: r.offY + p1.y * r.drawH },
+                        p2: { x: r.offX + p2.x * r.drawW, y: r.offY + p2.y * r.drawH }
+                    });
+                }
+            }
+        }
+
+        if (inOutEdges.length && polyCanvasPts.length >= 3) {
+            for (let i = 0; i < inOutEdges.length; i++) {
+                drawInOutArrowsForEdge(inOutEdges[i].p1, inOutEdges[i].p2, polyCanvasPts);
             }
         }
 
@@ -543,6 +766,8 @@ self.onInit = function () {
         g.strokeStyle = color;
         g.fillStyle = color;
         g.lineWidth = isActive ? 2.8 : 1.6;
+        g.lineJoin = 'round';
+        g.lineCap = 'round';
         g.globalAlpha = isActive ? 1 : 0.55;
 
         if (pointsNorm.length >= 3) {
@@ -564,6 +789,7 @@ self.onInit = function () {
             for (let i = 1; i < pointsNorm.length; i++) {
                 g.lineTo(r.offX + pointsNorm[i].x * r.drawW, r.offY + pointsNorm[i].y * r.drawH);
             }
+            if (pointsNorm.length >= 3) g.closePath();
             g.stroke();
         }
 
@@ -1092,6 +1318,10 @@ self.onInit = function () {
         const idx = getEdgeIndexAtPos(ev);
         if (idx !== self._hoverEdgeIdx) {
             self._hoverEdgeIdx = idx;
+            // Update cursor when hovering over edge
+            if (self._tabletPair && self._tabletPair.length === 4 && canvasEl) {
+                canvasEl.style.cursor = (idx !== null) ? 'pointer' : 'default';
+            }
             redraw();
         }
     }
@@ -1101,6 +1331,8 @@ self.onInit = function () {
             self._hoverEdgeIdx = null;
             redraw();
         }
+        // Reset cursor when leaving canvas
+        updateCursor();
     }
 
     if (canvasEl) {
@@ -1119,6 +1351,7 @@ self.onInit = function () {
         } else {
             if (self._tabletPair && self._tabletPair.length) self._tabletPair.pop();
             self._lineTypes = [null, null, null, null];
+            updateCursor();
         }
         redraw();
     }, { silent: true });
@@ -1128,6 +1361,7 @@ self.onInit = function () {
         else {
             self._tabletPair = [];
             self._lineTypes = [null, null, null, null];
+            updateCursor();
         }
         redraw();
     });

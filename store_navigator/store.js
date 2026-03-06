@@ -81,6 +81,7 @@ self.onDestroy = function () {
         clearTimeout(self.persistTimer);
         self.persistTimer = null;
     }
+    persistReqSeq++;
     teardownCustomDropdowns();
     try { ensureStoreDropdownManager().close(); } catch (e) { }
 };
@@ -230,6 +231,7 @@ function isDeviceSelectEmpty() {
 
 let devicesReqSeq = 0;
 let typesReqSeq = 0;
+let persistReqSeq = 0;
 
 async function loadDevicesByType(type, preferredDeviceId) {
     if (!type) {
@@ -803,18 +805,21 @@ function persistSelection(options) {
 
     // Call async version
     if (self.persistTimer) clearTimeout(self.persistTimer);
+    const myPersistSeq = ++persistReqSeq;
     self.persistTimer = setTimeout(() => {
-        persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName);
+        persistSelectionAsync(myPersistSeq, selectedType, selectedDeviceId, selectedDeviceName);
     }, 150);
 }
 
-async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName) {
+async function persistSelectionAsync(myPersistSeq, selectedType, selectedDeviceId, selectedDeviceName) {
+    if (myPersistSeq !== persistReqSeq) return;
     try {
         // Note: selectedDeviceType is already included in the 'default' state params below
         // No need to update it separately to avoid multiple state change events
 
         // ========= ALL DEVICES =========
         if (selectedDeviceId === '__ALL__') {
+            if (myPersistSeq !== persistReqSeq) return;
             // //console.log('[store_type] 📋 All devices selected for type:', selectedType);
 
             const devices = self.currentDevices || [];
@@ -872,6 +877,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
 
         // ========= SINGLE DEVICE =========
         if (selectedDeviceId) {
+            if (myPersistSeq !== persistReqSeq) return;
             //console.log('[store_type] ➡️ Entering SINGLE device block, deviceId:', selectedDeviceId);
 
             // ✅ ALL params in ONE object for 'default' state
@@ -906,6 +912,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
             } catch (e) {
                 //console.warn('[store_type] Could not fetch device label');
             }
+            if (myPersistSeq !== persistReqSeq) return;
 
             // Update stateParams with label
             stateParams.selectedDeviceLabel = selectedDeviceLabel;
@@ -938,6 +945,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
         // //console.warn('[store_type] No device selected. Clearing related states.');
 
         // ✅ ALL params in ONE object - set to null/NONE for clearing
+        if (myPersistSeq !== persistReqSeq) return;
         const stateParams = {
             entityType: null,
             id: null,

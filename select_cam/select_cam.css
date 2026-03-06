@@ -40,6 +40,9 @@
 .store-card { flex: 2.5; }
 .device-card { flex: 3.2; }
 .cam-card { flex: 2.5; }
+.cam-card.cam-hidden {
+  display: none !important;
+}
 .action-card { 
   flex: 1.4; 
   justify-content: center; 
@@ -90,17 +93,22 @@
 
 /* Tablet theme (purple) */
 .cam-card.cam-tablet {
-  border-color: #C4B5FD;
+  border-color: #FFFFFF;
 }
 .cam-card.cam-tablet .card-icon-wrapper {
-  background-color: #F3E8FF;
+  background-color: #FFFFFF;
 }
 .cam-card.cam-tablet .card-label,
 .cam-card.cam-tablet .card-value {
-  color: #7C3AED;
+  color: #FFFFFF;
 }
 .cam-card.cam-tablet .card-arrow path {
-  stroke: #7C3AED;
+  stroke: #FFFFFF;
+}
+.cam-card.cam-tablet .card-icon-wrapper svg path,
+.cam-card.cam-tablet .card-icon-wrapper svg rect,
+.cam-card.cam-tablet .card-icon-wrapper svg line {
+  stroke: #FFFFFF;
 }
 .cam-card.cam-tablet {
   cursor: default;
@@ -149,13 +157,13 @@
   margin-top: 2px;
   padding: 0 10px;
   border-radius: 8px;
-  background: #F3E8FF;
-  color: #7C3AED;
+  background: #FFFFFF;
+  color: #FFFFFF;
   font-size: 12px;
   font-weight: 700;
   line-height: 1.2;
   width: fit-content;
-  border: 1px solid #E5E7EB;
+  border: 1px solid #FFFFFF;
   height: 22px;
 }
 .cam-card.cam-tablet .cam-banner {

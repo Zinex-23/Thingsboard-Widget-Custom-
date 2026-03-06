@@ -2,11 +2,35 @@
     <div class="toolbar">
         <div class="toolbar-row">
             <div class="toolbar-left">
-                <button class="tb-btn btn-save" mat-button color="primary" (click)="savePolygon()">Save</button>
-                <button class="tb-btn btn-undo" mat-button (click)="undoPoint()">Undo</button>
-                <button class="tb-btn btn-clear" mat-button (click)="clearAll()">Clear</button>
-                <button class="tb-btn btn-reload" mat-button (click)="reloadSaved()">Reload</button>
-                <div class="roi-hint">Draw 4 points to form ROI, then click a line to set IN_OUT or NONE.</div>
+                <button class="tb-btn btn-save" data-tip="Save" mat-button color="primary" (click)="savePolygon()">Save</button>
+                <button class="tb-btn btn-undo" data-tip="Undo" mat-button (click)="undoPoint()">Undo</button>
+                <button class="tb-btn btn-clear" data-tip="Delete" mat-button (click)="clearAll()">Clear</button>
+                <button class="tb-btn btn-reload" data-tip="Reload" mat-button (click)="reloadSaved()">Reload</button>
+            </div>
+
+            <div class="flow-legend" data-mode="tablet">
+                <span class="flow-item flow-pass">
+                    <span class="flow-icon flow-icon-tablet">
+                        <span class="flow-arrow"></span>
+                    </span>
+                    <span class="flow-icon flow-icon-edge">
+                        <span class="flow-box flow-green"></span>
+                        <span class="flow-link">&#8594;</span>
+                        <span class="flow-box flow-red"></span>
+                    </span>
+                    <span class="legend-pass-label">Pass</span>
+                </span>
+                <span class="flow-item flow-out">
+                    <span class="flow-icon flow-icon-tablet">
+                        <span class="flow-arrow"></span>
+                    </span>
+                    <span class="flow-icon flow-icon-edge">
+                        <span class="flow-box flow-red"></span>
+                        <span class="flow-link">&#8594;</span>
+                        <span class="flow-box flow-green"></span>
+                    </span>
+                    <span class="legend-out-label">Exit</span>
+                </span>
             </div>
 
             <div class="toolbar-right">
@@ -34,6 +58,8 @@
                 <div class="loading-text">Loading latest frame...</div>
             </div>
         </div>
+
+        <div class="roi-hint">Draw ROI with 4 points, then click red edge to set counting line.</div>
 
         <div class="toast-center"></div>
     </div>

@@ -1,0 +1,1270 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>drawROI Preview</title>
+    <link rel="stylesheet" href="./drawROI.css" />
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            background: #eef2f6;
+            font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+            color: #1f2937;
+        }
+
+        .page {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding: 12px;
+            box-sizing: border-box;
+        }
+
+        .demo-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: #ffffff;
+            border: 1px solid #dbe3ee;
+        }
+
+        .demo-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .demo-label {
+            font-size: 13px;
+            font-weight: 600;
+            color: #334155;
+        }
+
+        .demo-select,
+        .demo-btn {
+            height: 34px;
+            border-radius: 8px;
+            border: 1px solid #d1dbe8;
+            background: #fff;
+            color: #334155;
+            font-size: 13px;
+            font-weight: 600;
+            padding: 0 12px;
+        }
+
+        .demo-btn {
+            cursor: pointer;
+            background: #f8fafc;
+        }
+
+        .demo-btn:hover {
+            border-color: #94a3b8;
+            background: #f1f5f9;
+        }
+
+        .demo-note {
+            font-size: 12px;
+            color: #64748b;
+            margin: 0;
+        }
+
+        .demo-grid {
+            flex: 1;
+            min-height: 0;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 12px;
+        }
+
+        .preview-shell {
+            min-height: 0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #dbe3ee;
+            background: #fff;
+        }
+
+        .data-card {
+            min-height: 0;
+            border-radius: 12px;
+            background: #ffffff;
+            border: 1px solid #dbe3ee;
+            padding: 12px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .data-card h3 {
+            margin: 0;
+            font-size: 15px;
+            color: #0f172a;
+        }
+
+        .data-block {
+            min-height: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .data-title {
+            font-size: 12px;
+            font-weight: 700;
+            color: #334155;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            margin: 0;
+        }
+
+        .data-pre {
+            margin: 0;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #1e293b;
+            font-size: 11px;
+            line-height: 1.45;
+            white-space: pre-wrap;
+            overflow: auto;
+            flex: 1;
+            min-height: 80px;
+        }
+
+        .data-tip {
+            margin: 0;
+            font-size: 12px;
+            color: #64748b;
+        }
+
+        @media (max-width: 1200px) {
+            .demo-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: minmax(360px, 1fr) auto;
+            }
+
+            .data-card {
+                max-height: 320px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <div class="demo-bar">
+            <div class="demo-left">
+                <span class="demo-label">Sample profile</span>
+                <select class="demo-select" id="presetSelect">
+                    <option value="tabletDevice">tablet device</option>
+                    <option value="edgeDevice">edge device</option>
+                </select>
+                <button class="demo-btn" id="loadPresetBtn">Load sample</button>
+            </div>
+            <p class="demo-note">Tablet mode: draw 4 points then click red edge to toggle counting line (Pass/Exit arrows). Edge mode: select ROI then draw points.</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="preview-shell">
+                <div class="wrapper">
+                    <div class="toolbar">
+                        <div class="toolbar-row">
+                            <div class="toolbar-left">
+                                <button class="tb-btn btn-save" data-tip="Save">Save</button>
+                                <button class="tb-btn btn-undo" data-tip="Undo">Undo</button>
+                                <button class="tb-btn btn-clear" data-tip="Delete">Clear</button>
+                                <button class="tb-btn btn-reload" data-tip="Reload">Reload</button>
+                            </div>
+
+                            <div class="flow-legend" data-mode="tablet">
+                                <span class="flow-item flow-pass">
+                                    <span class="flow-icon flow-icon-tablet">
+                                        <span class="flow-arrow"></span>
+                                    </span>
+                                    <span class="flow-icon flow-icon-edge">
+                                        <span class="flow-box flow-green"></span>
+                                        <span class="flow-link">&#8594;</span>
+                                        <span class="flow-box flow-red"></span>
+                                    </span>
+                                    <span class="legend-pass-label">Pass</span>
+                                </span>
+                                <span class="flow-item flow-out">
+                                    <span class="flow-icon flow-icon-tablet">
+                                        <span class="flow-arrow"></span>
+                                    </span>
+                                    <span class="flow-icon flow-icon-edge">
+                                        <span class="flow-box flow-red"></span>
+                                        <span class="flow-link">&#8594;</span>
+                                        <span class="flow-box flow-green"></span>
+                                    </span>
+                                    <span class="legend-out-label">Exit</span>
+                                </span>
+                            </div>
+
+                            <div class="toolbar-right">
+                                <div class="cam-box">
+                                    <label class="cam-label">Camera</label>
+                                    <select class="cam-dd"></select>
+                                </div>
+                                <div class="roi-switch">
+                                    <button class="roi-btn active" data-roi="Detect">Detect</button>
+                                    <button class="roi-btn" data-roi="Region1">Region1</button>
+                                    <button class="roi-btn" data-roi="Region2">Region2</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="stage">
+                        <canvas></canvas>
+
+                        <div class="loading-overlay">
+                            <div class="loading-card">
+                                <div class="spinner"></div>
+                                <div class="loading-text">Loading latest frame...</div>
+                            </div>
+                        </div>
+
+                        <div class="roi-hint"></div>
+
+                        <div class="toast-center"></div>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="data-card">
+                <h3>Sample data</h3>
+                <div class="data-block">
+                    <p class="data-title">tablet device</p>
+                    <pre class="data-pre" id="tabletDataPre"></pre>
+                </div>
+                <div class="data-block">
+                    <p class="data-title">edge device</p>
+                    <pre class="data-pre" id="edgeDataPre"></pre>
+                </div>
+                <p class="data-tip">Save will update the in-memory sample payload above.</p>
+            </aside>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const FRAME_W = 1280;
+            const FRAME_H = 720;
+            const ROI_COLOR = { Detect: '#FFD400', Region1: '#22C55E', Region2: '#EF4444' };
+
+            const stageEl = document.querySelector('.stage');
+            const canvasEl = document.querySelector('canvas');
+            const camBoxEl = document.querySelector('.cam-box');
+            const selectEl = document.querySelector('.cam-dd');
+            const roiSwitchEl = document.querySelector('.roi-switch');
+            const roiBtns = Array.from(document.querySelectorAll('.roi-btn'));
+            const flowLegendEl = document.querySelector('.flow-legend');
+            const legendPassEl = document.querySelector('.legend-pass-label');
+            const legendOutEl = document.querySelector('.legend-out-label');
+            const toastCenter = document.querySelector('.toast-center');
+            const roiHintEl = document.querySelector('.roi-hint');
+            const btnSaveEl = document.querySelector('.btn-save');
+            const btnUndoEl = document.querySelector('.btn-undo');
+            const btnClearEl = document.querySelector('.btn-clear');
+            const btnReloadEl = document.querySelector('.btn-reload');
+            const presetSelectEl = document.getElementById('presetSelect');
+            const loadPresetBtn = document.getElementById('loadPresetBtn');
+            const tabletDataPre = document.getElementById('tabletDataPre');
+            const edgeDataPre = document.getElementById('edgeDataPre');
+
+            const g = canvasEl.getContext('2d');
+
+            const state = {
+                mode: 'tablet',
+                activeRoiName: 'Detect',
+                activeCam: null,
+                preferredCamId: null,
+                cams: [],
+                tabletPair: [],
+                lineTypes: [null, null, null, null],
+                hoverEdgeIdx: null,
+                roisNorm: { Detect: [], Region1: [], Region2: [] },
+                bgImg: new Image(),
+                bgReady: false,
+                imgDraw: { offX: 0, offY: 0, drawW: 0, drawH: 0 },
+                currentPresetName: 'tabletDevice'
+            };
+
+            function deepClone(v) {
+                return JSON.parse(JSON.stringify(v));
+            }
+
+            function clamp01(n) {
+                return Math.max(0, Math.min(1, n));
+            }
+
+            function parseCurrentCam(v) {
+                if (v == null) return null;
+                const m = String(v).match(/(\d+)/);
+                return m ? String(Number(m[1])) : null;
+            }
+
+            function toPixelFlat(pointsNorm, w, h) {
+                const out = [];
+                pointsNorm.forEach((p) => out.push(Math.round(clamp01(p.x) * w), Math.round(clamp01(p.y) * h)));
+                return out;
+            }
+
+            function pixelFlatToNorm(flat, w, h) {
+                if (!Array.isArray(flat)) return [];
+                const pts = [];
+                for (let i = 0; i + 1 < flat.length; i += 2) {
+                    pts.push({ x: clamp01(Number(flat[i]) / w), y: clamp01(Number(flat[i + 1]) / h) });
+                }
+                return pts;
+            }
+
+            function polygonAreaNorm(pointsNorm) {
+                if (!pointsNorm || pointsNorm.length < 3) return 0;
+                let sum = 0;
+                for (let i = 0; i < pointsNorm.length; i++) {
+                    const p1 = pointsNorm[i];
+                    const p2 = pointsNorm[(i + 1) % pointsNorm.length];
+                    sum += (p1.x * p2.y) - (p2.x * p1.y);
+                }
+                return Math.abs(sum) / 2;
+            }
+
+            function createDemoFrame(label, a, b) {
+                const c = document.createElement('canvas');
+                c.width = FRAME_W;
+                c.height = FRAME_H;
+                const ctx = c.getContext('2d');
+
+                const grad = ctx.createLinearGradient(0, 0, FRAME_W, FRAME_H);
+                grad.addColorStop(0, a);
+                grad.addColorStop(1, b);
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, FRAME_W, FRAME_H);
+
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                for (let x = 0; x <= FRAME_W; x += 80) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, 0);
+                    ctx.lineTo(x, FRAME_H);
+                    ctx.stroke();
+                }
+                for (let y = 0; y <= FRAME_H; y += 80) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.lineTo(FRAME_W, y);
+                    ctx.stroke();
+                }
+
+                ctx.fillStyle = 'rgba(15,23,42,0.72)';
+                ctx.fillRect(40, 34, 420, 78);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '700 38px Inter, sans-serif';
+                ctx.fillText(label, 60, 84);
+                ctx.font = '500 20px Inter, sans-serif';
+                ctx.fillText('Preview frame ' + FRAME_W + 'x' + FRAME_H, 60, 112);
+
+                return c.toDataURL('image/jpeg', 0.9);
+            }
+
+            function buildInitialSamples() {
+                const tabletPointsNorm = [
+                    { x: 0.2, y: 0.22 },
+                    { x: 0.76, y: 0.24 },
+                    { x: 0.72, y: 0.78 },
+                    { x: 0.24, y: 0.74 }
+                ];
+
+                const edgeCam1 = {
+                    Detect: [
+                        { x: 0.16, y: 0.16 },
+                        { x: 0.84, y: 0.2 },
+                        { x: 0.82, y: 0.86 },
+                        { x: 0.14, y: 0.82 }
+                    ],
+                    Region1: [
+                        { x: 0.21, y: 0.3 },
+                        { x: 0.41, y: 0.32 },
+                        { x: 0.36, y: 0.58 },
+                        { x: 0.2, y: 0.55 }
+                    ],
+                    Region2: [
+                        { x: 0.57, y: 0.33 },
+                        { x: 0.76, y: 0.35 },
+                        { x: 0.74, y: 0.65 },
+                        { x: 0.56, y: 0.62 }
+                    ]
+                };
+
+                const edgeCam2 = {
+                    Detect: [
+                        { x: 0.12, y: 0.15 },
+                        { x: 0.88, y: 0.18 },
+                        { x: 0.85, y: 0.84 },
+                        { x: 0.14, y: 0.8 }
+                    ],
+                    Region1: [
+                        { x: 0.25, y: 0.28 },
+                        { x: 0.47, y: 0.3 },
+                        { x: 0.43, y: 0.57 },
+                        { x: 0.23, y: 0.55 }
+                    ],
+                    Region2: [
+                        { x: 0.6, y: 0.35 },
+                        { x: 0.8, y: 0.37 },
+                        { x: 0.78, y: 0.67 },
+                        { x: 0.58, y: 0.64 }
+                    ]
+                };
+
+                return {
+                    tabletDevice: {
+                        deviceLabel: 'tablet-type',
+                        frame_base64: createDemoFrame('tablet device', '#1f3b8a', '#0ea5a3'),
+                        statistic_config: {
+                            points: toPixelFlat(tabletPointsNorm, FRAME_W, FRAME_H),
+                            rules: ['NONE', 'IN_OUT', 'NONE', 'NONE']
+                        }
+                    },
+                    edgeDevice: {
+                        deviceLabel: 'edge-type',
+                        current_cam: 'CAM_2',
+                        pass_cam: {
+                            '1': { name: 'Gate East' },
+                            '2': { name: 'Gate West' }
+                        },
+                        frames: {
+                            '1': createDemoFrame('edge cam 1', '#6d28d9', '#2563eb'),
+                            '2': createDemoFrame('edge cam 2', '#dc2626', '#f59e0b')
+                        },
+                        statistic_config: [
+                            {
+                                id: 'CAM_1',
+                                point: [
+                                    toPixelFlat(edgeCam1.Detect, FRAME_W, FRAME_H),
+                                    toPixelFlat(edgeCam1.Region1, FRAME_W, FRAME_H),
+                                    toPixelFlat(edgeCam1.Region2, FRAME_W, FRAME_H)
+                                ]
+                            },
+                            {
+                                id: 'CAM_2',
+                                point: [
+                                    toPixelFlat(edgeCam2.Detect, FRAME_W, FRAME_H),
+                                    toPixelFlat(edgeCam2.Region1, FRAME_W, FRAME_H),
+                                    toPixelFlat(edgeCam2.Region2, FRAME_W, FRAME_H)
+                                ]
+                            }
+                        ]
+                    }
+                };
+            }
+
+            const initialSamples = buildInitialSamples();
+            const samples = deepClone(initialSamples);
+
+            function toast(type, msg) {
+                const el = document.createElement('div');
+                el.className = 'toast ' + (type || 'info');
+                el.textContent = msg;
+                toastCenter.appendChild(el);
+                setTimeout(() => {
+                    try {
+                        toastCenter.removeChild(el);
+                    } catch (e) {
+                        // no-op
+                    }
+                }, 2700);
+            }
+
+            function setLoading(on) {
+                stageEl.classList.toggle('is-loading', !!on);
+            }
+
+            function updateHint() {
+                if (state.mode === 'tablet') {
+                    roiHintEl.classList.remove('is-edge');
+                    roiHintEl.innerHTML = `
+                        <span class="hint-text">Draw ROI with 4 points, then tap the red edge to toggle counting line.</span>
+                        <span class="hint-chips">
+                            <span class="hint-chip flow-item flow-pass">
+                                <span class="flow-arrow"></span>
+                                <span>Pass</span>
+                            </span>
+                            <span class="hint-chip flow-item flow-out">
+                                <span class="flow-arrow"></span>
+                                <span>Exit</span>
+                            </span>
+                        </span>
+                    `;
+                    roiHintEl.style.display = '';
+                } else if (state.mode === 'edge') {
+                    roiHintEl.classList.add('is-edge');
+                    roiHintEl.textContent = 'Select Detect/Region1/Region2, then tap points to draw ROI.';
+                    roiHintEl.style.display = '';
+                } else {
+                    roiHintEl.style.display = 'none';
+                }
+            }
+
+            function setActiveRoi(name) {
+                state.activeRoiName = name;
+                roiBtns.forEach((btn) => btn.classList.toggle('active', btn.dataset.roi === name));
+                redraw();
+            }
+
+            function applyModeUI() {
+                camBoxEl.style.display = (state.mode === 'edge') ? 'flex' : 'none';
+                roiSwitchEl.style.display = (state.mode === 'edge') ? 'flex' : 'none';
+                if (flowLegendEl) {
+                    const showLegend = (state.mode === 'tablet' || state.mode === 'edge');
+                    flowLegendEl.style.display = showLegend ? 'flex' : 'none';
+                    flowLegendEl.setAttribute('data-mode', (state.mode === 'edge') ? 'edge' : 'tablet');
+                }
+                if (legendPassEl) legendPassEl.textContent = 'Pass';
+                if (legendOutEl) legendOutEl.textContent = 'Exit';
+                updateHint();
+                updateCursor();
+            }
+
+            function getStageWH() {
+                return { w: stageEl.clientWidth, h: stageEl.clientHeight };
+            }
+
+            function computeImageDrawRect(stageW, stageH) {
+                if (!state.bgReady) {
+                    state.imgDraw = { offX: 0, offY: 0, drawW: 0, drawH: 0 };
+                    return state.imgDraw;
+                }
+                const imgW = state.bgImg.naturalWidth || FRAME_W;
+                const imgH = state.bgImg.naturalHeight || FRAME_H;
+                const scale = Math.min(stageW / imgW, stageH / imgH);
+                const drawW = imgW * scale;
+                const drawH = imgH * scale;
+                const offX = (stageW - drawW) / 2;
+                const offY = (stageH - drawH) / 2;
+                state.imgDraw = { offX, offY, drawW, drawH };
+                return state.imgDraw;
+            }
+
+            function normToCanvasPt(p) {
+                const r = state.imgDraw;
+                return { x: r.offX + p.x * r.drawW, y: r.offY + p.y * r.drawH };
+            }
+
+            function evToPointOnImageNorm(ev) {
+                const { w, h } = getStageWH();
+                const r = canvasEl.getBoundingClientRect();
+                const xCss = ev.clientX - r.left;
+                const yCss = ev.clientY - r.top;
+                const img = computeImageDrawRect(w, h);
+                if (img.drawW <= 0 || img.drawH <= 0) return null;
+                if (xCss < img.offX || xCss > img.offX + img.drawW || yCss < img.offY || yCss > img.offY + img.drawH) return null;
+                return { x: clamp01((xCss - img.offX) / img.drawW), y: clamp01((yCss - img.offY) / img.drawH) };
+            }
+
+            function dist2PointToSegment(px, py, x1, y1, x2, y2) {
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                if (dx === 0 && dy === 0) {
+                    const ox = px - x1;
+                    const oy = py - y1;
+                    return ox * ox + oy * oy;
+                }
+                const t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy);
+                const tt = Math.max(0, Math.min(1, t));
+                const cx = x1 + tt * dx;
+                const cy = y1 + tt * dy;
+                const ox = px - cx;
+                const oy = py - cy;
+                return ox * ox + oy * oy;
+            }
+
+            function pointInPolygon(px, py, polyPts) {
+                if (!polyPts || polyPts.length < 3) return false;
+                let inside = false;
+                for (let i = 0, j = polyPts.length - 1; i < polyPts.length; j = i++) {
+                    const xi = polyPts[i].x;
+                    const yi = polyPts[i].y;
+                    const xj = polyPts[j].x;
+                    const yj = polyPts[j].y;
+                    const den = (yj - yi) || 1e-9;
+                    const crossX = ((xj - xi) * (py - yi)) / den + xi;
+                    const intersects = ((yi > py) !== (yj > py)) && (px < crossX);
+                    if (intersects) inside = !inside;
+                }
+                return inside;
+            }
+
+            function getInwardNormalForEdge(p1, p2, polyCanvasPts) {
+                const ex = p2.x - p1.x;
+                const ey = p2.y - p1.y;
+                const edgeLen = Math.hypot(ex, ey);
+                if (edgeLen < 1e-6) return null;
+
+                const nLeft = { x: -ey / edgeLen, y: ex / edgeLen };
+                const nRight = { x: -nLeft.x, y: -nLeft.y };
+                const mx = (p1.x + p2.x) * 0.5;
+                const my = (p1.y + p2.y) * 0.5;
+                const probe = Math.max(10, Math.min(24, edgeLen * 0.16));
+
+                const leftInside = pointInPolygon(mx + nLeft.x * probe, my + nLeft.y * probe, polyCanvasPts);
+                const rightInside = pointInPolygon(mx + nRight.x * probe, my + nRight.y * probe, polyCanvasPts);
+
+                if (leftInside !== rightInside) return leftInside ? nLeft : nRight;
+
+                // Fallback for ambiguous boundaries: choose normal toward polygon centroid.
+                let cx = 0;
+                let cy = 0;
+                for (let i = 0; i < polyCanvasPts.length; i++) {
+                    cx += polyCanvasPts[i].x;
+                    cy += polyCanvasPts[i].y;
+                }
+                cx /= polyCanvasPts.length || 1;
+                cy /= polyCanvasPts.length || 1;
+
+                const dotLeft = (cx - mx) * nLeft.x + (cy - my) * nLeft.y;
+                const dotRight = (cx - mx) * nRight.x + (cy - my) * nRight.y;
+                return (dotLeft >= dotRight) ? nLeft : nRight;
+            }
+
+            function drawFlowArrow(cx, cy, dirX, dirY, style, geom) {
+                const mag = Math.hypot(dirX, dirY);
+                if (mag < 1e-6) return;
+
+                const ux = dirX / mag;
+                const uy = dirY / mag;
+                const len = geom.len;
+                const shaftH = geom.shaftH;
+                const headL = geom.headL;
+
+                const halfShaft = shaftH * 0.5;
+                const headHalf = Math.max(halfShaft + 2, shaftH * 0.72);
+                const xStart = -len * 0.5;
+                const xHeadBase = len * 0.5 - headL;
+                const xTip = len * 0.5;
+
+                g.save();
+                g.translate(cx, cy);
+                g.rotate(Math.atan2(uy, ux));
+
+                g.shadowColor = 'rgba(15,23,42,0.30)';
+                g.shadowBlur = 8;
+                g.shadowOffsetY = 2;
+
+                const grad = g.createLinearGradient(xStart, 0, xTip, 0);
+                grad.addColorStop(0, style.fillA || style.fill);
+                grad.addColorStop(1, style.fillB || style.fill);
+
+                g.fillStyle = grad;
+                g.strokeStyle = style.stroke;
+                g.lineWidth = 1.7;
+
+                g.beginPath();
+                g.moveTo(xStart, -halfShaft);
+                g.lineTo(xHeadBase, -halfShaft);
+                g.lineTo(xHeadBase, -headHalf);
+                g.lineTo(xTip, 0);
+                g.lineTo(xHeadBase, headHalf);
+                g.lineTo(xHeadBase, halfShaft);
+                g.lineTo(xStart, halfShaft);
+                g.closePath();
+                g.fill();
+                g.stroke();
+
+                g.shadowColor = 'transparent';
+                g.beginPath();
+                g.moveTo(xStart + 4, -halfShaft + 2.2);
+                g.lineTo(xHeadBase - 4, -halfShaft + 2.2);
+                g.lineTo(xHeadBase - 1.4, -1.4);
+                g.strokeStyle = 'rgba(255,255,255,0.34)';
+                g.lineWidth = 1.15;
+                g.stroke();
+
+                g.beginPath();
+                g.moveTo(xStart + 3, halfShaft - 1.8);
+                g.lineTo(xHeadBase - 3.6, halfShaft - 1.8);
+                g.strokeStyle = 'rgba(15,23,42,0.2)';
+                g.lineWidth = 1.05;
+                g.stroke();
+
+                g.restore();
+            }
+
+            function drawInOutArrowsForEdge(p1, p2, polyCanvasPts) {
+                const ex = p2.x - p1.x;
+                const ey = p2.y - p1.y;
+                const edgeLen = Math.hypot(ex, ey);
+                if (edgeLen < 24) return;
+
+                const tx = ex / edgeLen;
+                const ty = ey / edgeLen;
+                const inward = getInwardNormalForEdge(p1, p2, polyCanvasPts);
+                if (!inward) return;
+                const outward = { x: -inward.x, y: -inward.y };
+
+                const arrowLen = Math.max(58, Math.min(88, edgeLen * 0.58));
+                const shaftH = Math.max(18, Math.min(26, arrowLen * 0.34));
+                const headL = Math.max(16, Math.min(24, arrowLen * 0.34));
+                const tangentShift = Math.min(edgeLen * 0.22, arrowLen * 0.42);
+
+                const mx = (p1.x + p2.x) * 0.5;
+                const my = (p1.y + p2.y) * 0.5;
+
+                const inCenter = {
+                    x: mx + tx * tangentShift,
+                    y: my + ty * tangentShift
+                };
+                const outCenter = {
+                    x: mx - tx * tangentShift,
+                    y: my - ty * tangentShift
+                };
+
+                drawFlowArrow(inCenter.x, inCenter.y, inward.x, inward.y, {
+                    fillA: 'rgba(52,211,153,0.96)',
+                    fillB: 'rgba(22,163,74,0.96)',
+                    stroke: '#166534'
+                }, { len: arrowLen, shaftH: shaftH, headL: headL });
+
+                drawFlowArrow(outCenter.x, outCenter.y, outward.x, outward.y, {
+                    fillA: 'rgba(251,113,133,0.95)',
+                    fillB: 'rgba(239,68,68,0.95)',
+                    stroke: '#991b1b'
+                }, { len: arrowLen, shaftH: shaftH, headL: headL });
+            }
+
+            function getEdgeIndexAtPos(ev) {
+                if (!state.tabletPair || state.tabletPair.length !== 4) return null;
+                const r = canvasEl.getBoundingClientRect();
+                const mx = ev.clientX - r.left;
+                const my = ev.clientY - r.top;
+                const img = state.imgDraw;
+                if (mx < img.offX || mx > img.offX + img.drawW || my < img.offY || my > img.offY + img.drawH) return null;
+
+                const pts = state.tabletPair.map(normToCanvasPt);
+                let bestIdx = null;
+                let bestDist2 = Infinity;
+                const hit2 = 8 * 8;
+                for (let i = 0; i < 4; i++) {
+                    const p1 = pts[i];
+                    const p2 = pts[(i + 1) % 4];
+                    const d2 = dist2PointToSegment(mx, my, p1.x, p1.y, p2.x, p2.y);
+                    if (d2 < hit2 && d2 < bestDist2) {
+                        bestDist2 = d2;
+                        bestIdx = i;
+                    }
+                }
+                return bestIdx;
+            }
+
+            function drawTabletPolygon(points) {
+                if (!points || !points.length) return;
+                const r = state.imgDraw;
+                const baseColor = '#F44336';
+                const lineColors = { in_out: '#1E88E5', base: baseColor };
+                const polyCanvasPts = points.map((p) => ({
+                    x: r.offX + p.x * r.drawW,
+                    y: r.offY + p.y * r.drawH
+                }));
+                const inOutEdges = [];
+
+                g.save();
+                g.strokeStyle = baseColor;
+                g.fillStyle = baseColor;
+                g.lineWidth = 2.6;
+
+                if (points.length >= 3) {
+                    g.save();
+                    g.globalAlpha = 0.2;
+                    g.beginPath();
+                    g.moveTo(r.offX + points[0].x * r.drawW, r.offY + points[0].y * r.drawH);
+                    for (let i = 1; i < points.length; i++) {
+                        g.lineTo(r.offX + points[i].x * r.drawW, r.offY + points[i].y * r.drawH);
+                    }
+                    g.closePath();
+                    g.fill();
+                    g.restore();
+                }
+
+                if (points.length >= 2) {
+                    const closeLoop = points.length >= 3;
+                    const edgeCount = closeLoop ? points.length : points.length - 1;
+                    for (let i = 0; i < edgeCount; i++) {
+                        const p1 = points[i];
+                        const p2 = points[(i + 1) % points.length];
+                        const type = (points.length === 4 && state.lineTypes && state.lineTypes[i]) ? state.lineTypes[i] : null;
+                        const isHover = (state.hoverEdgeIdx === i);
+                        g.strokeStyle = lineColors[type] || lineColors.base;
+                        g.lineWidth = type ? (isHover ? 3.8 : 3.2) : (isHover ? 3.2 : 2.6);
+                        g.globalAlpha = isHover ? 1 : 0.92;
+
+                        g.beginPath();
+                        g.moveTo(r.offX + p1.x * r.drawW, r.offY + p1.y * r.drawH);
+                        g.lineTo(r.offX + p2.x * r.drawW, r.offY + p2.y * r.drawH);
+                        g.stroke();
+
+                        if (type === 'in_out' && points.length === 4) {
+                            inOutEdges.push({
+                                p1: { x: r.offX + p1.x * r.drawW, y: r.offY + p1.y * r.drawH },
+                                p2: { x: r.offX + p2.x * r.drawW, y: r.offY + p2.y * r.drawH }
+                            });
+                        }
+                    }
+                }
+
+                if (inOutEdges.length && polyCanvasPts.length >= 3) {
+                    for (let i = 0; i < inOutEdges.length; i++) {
+                        drawInOutArrowsForEdge(inOutEdges[i].p1, inOutEdges[i].p2, polyCanvasPts);
+                    }
+                }
+
+                for (let i = 0; i < points.length; i++) {
+                    const p = points[i];
+                    const cx = r.offX + p.x * r.drawW;
+                    const cy = r.offY + p.y * r.drawH;
+                    g.beginPath();
+                    g.arc(cx, cy, 4.5, 0, Math.PI * 2);
+                    g.fill();
+                }
+
+                g.restore();
+            }
+
+            function drawRoi(pointsNorm, name, isActive) {
+                if (!pointsNorm || !pointsNorm.length) return;
+                const r = state.imgDraw;
+                const color = ROI_COLOR[name] || '#ff0000';
+
+                g.save();
+                g.strokeStyle = color;
+                g.fillStyle = color;
+                g.lineWidth = isActive ? 2.8 : 1.6;
+                g.lineJoin = 'round';
+                g.lineCap = 'round';
+                g.globalAlpha = isActive ? 1 : 0.55;
+
+                if (pointsNorm.length >= 3) {
+                    g.save();
+                    g.globalAlpha = isActive ? 0.18 : 0.1;
+                    g.beginPath();
+                    g.moveTo(r.offX + pointsNorm[0].x * r.drawW, r.offY + pointsNorm[0].y * r.drawH);
+                    for (let i = 1; i < pointsNorm.length; i++) {
+                        g.lineTo(r.offX + pointsNorm[i].x * r.drawW, r.offY + pointsNorm[i].y * r.drawH);
+                    }
+                    g.closePath();
+                    g.fill();
+                    g.restore();
+                }
+
+                if (pointsNorm.length >= 2) {
+                    g.beginPath();
+                    g.moveTo(r.offX + pointsNorm[0].x * r.drawW, r.offY + pointsNorm[0].y * r.drawH);
+                    for (let i = 1; i < pointsNorm.length; i++) {
+                        g.lineTo(r.offX + pointsNorm[i].x * r.drawW, r.offY + pointsNorm[i].y * r.drawH);
+                    }
+                    if (pointsNorm.length >= 3) g.closePath();
+                    g.stroke();
+                }
+
+                for (let i = 0; i < pointsNorm.length; i++) {
+                    const p = pointsNorm[i];
+                    const cx = r.offX + p.x * r.drawW;
+                    const cy = r.offY + p.y * r.drawH;
+                    g.beginPath();
+                    g.arc(cx, cy, 4, 0, Math.PI * 2);
+                    g.fill();
+                }
+
+                g.restore();
+            }
+
+            function updateCursor() {
+                if (state.mode === 'tablet' && state.tabletPair && state.tabletPair.length === 4) {
+                    canvasEl.classList.add('can-click-edge');
+                } else {
+                    canvasEl.classList.remove('can-click-edge');
+                    canvasEl.style.cursor = 'crosshair';
+                }
+            }
+
+            function redraw() {
+                const { w, h } = getStageWH();
+                g.clearRect(0, 0, w, h);
+                if (!state.bgReady) return;
+
+                const rect = computeImageDrawRect(w, h);
+                g.drawImage(state.bgImg, rect.offX, rect.offY, rect.drawW, rect.drawH);
+
+                if (state.mode === 'edge') {
+                    drawRoi(state.roisNorm.Detect, 'Detect', state.activeRoiName === 'Detect');
+                    drawRoi(state.roisNorm.Region1, 'Region1', state.activeRoiName === 'Region1');
+                    drawRoi(state.roisNorm.Region2, 'Region2', state.activeRoiName === 'Region2');
+                } else {
+                    drawTabletPolygon(state.tabletPair);
+                }
+
+                updateCursor();
+            }
+
+            function resize() {
+                const rect = stageEl.getBoundingClientRect();
+                const dpr = window.devicePixelRatio || 1;
+                canvasEl.width = Math.max(1, Math.floor(rect.width * dpr));
+                canvasEl.height = Math.max(1, Math.floor(rect.height * dpr));
+                g.setTransform(dpr, 0, 0, dpr, 0, 0);
+                redraw();
+            }
+
+            function setFrameSrc(src) {
+                setLoading(true);
+                state.bgReady = false;
+
+                state.bgImg.onload = function () {
+                    state.bgReady = true;
+                    setLoading(false);
+                    redraw();
+                };
+
+                state.bgImg.onerror = function () {
+                    state.bgReady = false;
+                    setLoading(false);
+                    toast('error', 'Failed to load frame image.');
+                };
+
+                state.bgImg.src = src;
+            }
+
+            function getCurrentFrameDims() {
+                return {
+                    w: state.bgImg.naturalWidth || FRAME_W,
+                    h: state.bgImg.naturalHeight || FRAME_H
+                };
+            }
+
+            function loadTabletFromSample() {
+                const cfg = samples.tabletDevice.statistic_config || {};
+                const dims = getCurrentFrameDims();
+                state.tabletPair = pixelFlatToNorm(cfg.points || [], dims.w, dims.h);
+                state.lineTypes = [null, null, null, null];
+                const rules = Array.isArray(cfg.rules) ? cfg.rules : [];
+                if (rules.length === 4 && state.tabletPair.length === 4) {
+                    state.lineTypes = rules.map((r) => String(r).toUpperCase() === 'IN_OUT' ? 'in_out' : null);
+                }
+                state.hoverEdgeIdx = null;
+                redraw();
+            }
+
+            function loadEdgeFromSample(camId) {
+                const dims = getCurrentFrameDims();
+                const cfgArr = Array.isArray(samples.edgeDevice.statistic_config) ? samples.edgeDevice.statistic_config : [];
+                const key = 'CAM_' + camId;
+                const item = cfgArr.find((x) => x && String(x.id) === key);
+
+                if (!item || !Array.isArray(item.point)) {
+                    state.roisNorm = { Detect: [], Region1: [], Region2: [] };
+                } else {
+                    state.roisNorm = {
+                        Detect: pixelFlatToNorm(item.point[0] || [], dims.w, dims.h),
+                        Region1: pixelFlatToNorm(item.point[1] || [], dims.w, dims.h),
+                        Region2: pixelFlatToNorm(item.point[2] || [], dims.w, dims.h)
+                    };
+                }
+                redraw();
+            }
+
+            function updateCamsFromSample() {
+                const passCam = samples.edgeDevice.pass_cam || {};
+                const camIds = Object.keys(passCam).sort((a, b) => Number(a) - Number(b));
+                state.cams = camIds;
+
+                selectEl.innerHTML = '';
+                if (!camIds.length) {
+                    const noOpt = document.createElement('option');
+                    noOpt.value = '';
+                    noOpt.textContent = 'No camera';
+                    selectEl.appendChild(noOpt);
+                    state.activeCam = null;
+                    return;
+                }
+
+                camIds.forEach((id) => {
+                    const opt = document.createElement('option');
+                    opt.value = id;
+                    opt.textContent = 'Cam ' + id;
+                    selectEl.appendChild(opt);
+                });
+
+                const preferred = parseCurrentCam(samples.edgeDevice.current_cam);
+                const next = state.activeCam && camIds.includes(state.activeCam)
+                    ? state.activeCam
+                    : (preferred && camIds.includes(preferred) ? preferred : camIds[0]);
+
+                selectEl.value = next;
+                setActiveCam(next);
+            }
+
+            function setActiveCam(camId) {
+                if (!camId) {
+                    state.activeCam = null;
+                    state.roisNorm = { Detect: [], Region1: [], Region2: [] };
+                    redraw();
+                    return;
+                }
+                state.activeCam = String(camId);
+                const src = samples.edgeDevice.frames[state.activeCam] || createDemoFrame('edge camera', '#475569', '#1e293b');
+                loadEdgeFromSample(state.activeCam);
+                setTimeout(() => setFrameSrc(src), 180);
+            }
+
+            function resetWorkingState() {
+                state.tabletPair = [];
+                state.lineTypes = [null, null, null, null];
+                state.hoverEdgeIdx = null;
+                state.roisNorm = { Detect: [], Region1: [], Region2: [] };
+                state.activeRoiName = 'Detect';
+            }
+
+            function applyPreset(name) {
+                state.currentPresetName = name;
+                resetWorkingState();
+                setActiveRoi('Detect');
+
+                if (name === 'edgeDevice') {
+                    state.mode = 'edge';
+                    applyModeUI();
+                    updateCamsFromSample();
+                } else {
+                    state.mode = 'tablet';
+                    applyModeUI();
+                    setFrameSrc(samples.tabletDevice.frame_base64);
+                    loadTabletFromSample();
+                }
+            }
+
+            function compactForPreview(value) {
+                if (typeof value === 'string') {
+                    if (value.startsWith('data:image') && value.length > 90) {
+                        return value.slice(0, 72) + '... (len: ' + value.length + ')';
+                    }
+                    if (value.length > 220) {
+                        return value.slice(0, 150) + '... (len: ' + value.length + ')';
+                    }
+                    return value;
+                }
+                if (Array.isArray(value)) {
+                    return value.map((item) => compactForPreview(item));
+                }
+                if (value && typeof value === 'object') {
+                    const out = {};
+                    Object.keys(value).forEach((k) => {
+                        out[k] = compactForPreview(value[k]);
+                    });
+                    return out;
+                }
+                return value;
+            }
+
+            function refreshDataPreview() {
+                tabletDataPre.textContent = JSON.stringify(compactForPreview(samples.tabletDevice), null, 2);
+                edgeDataPre.textContent = JSON.stringify(compactForPreview(samples.edgeDevice), null, 2);
+            }
+
+            function onSave() {
+                if (!state.bgReady) {
+                    toast('error', 'Frame is loading. Please try again.');
+                    return;
+                }
+
+                const dims = getCurrentFrameDims();
+
+                if (state.mode === 'tablet') {
+                    if (!state.tabletPair || state.tabletPair.length !== 4 || polygonAreaNorm(state.tabletPair) < 0.00001) {
+                        toast('error', 'Please select exactly 4 points to create ROI.');
+                        return;
+                    }
+                    const hasInOut = state.lineTypes.some((v) => v === 'in_out');
+                    if (!hasInOut) {
+                        toast('error', 'Please select at least one IN_OUT line.');
+                        return;
+                    }
+
+                    samples.tabletDevice.statistic_config = {
+                        points: toPixelFlat(state.tabletPair, dims.w, dims.h),
+                        rules: state.lineTypes.map((v) => v === 'in_out' ? 'IN_OUT' : 'NONE')
+                    };
+                    refreshDataPreview();
+                    toast('success', 'Saved tablet statistic_config.');
+                    return;
+                }
+
+                if (!state.activeCam) {
+                    toast('error', 'No camera selected.');
+                    return;
+                }
+
+                const ok = state.roisNorm.Detect.length >= 3 && state.roisNorm.Region1.length >= 3 && state.roisNorm.Region2.length >= 3;
+                if (!ok) {
+                    toast('error', 'You must draw 3 ROIs (Detect, Region1, Region2), each with at least 3 points.');
+                    return;
+                }
+
+                const id = 'CAM_' + state.activeCam;
+                const entry = {
+                    id: id,
+                    point: [
+                        toPixelFlat(state.roisNorm.Detect, dims.w, dims.h),
+                        toPixelFlat(state.roisNorm.Region1, dims.w, dims.h),
+                        toPixelFlat(state.roisNorm.Region2, dims.w, dims.h)
+                    ]
+                };
+
+                const list = Array.isArray(samples.edgeDevice.statistic_config) ? samples.edgeDevice.statistic_config : [];
+                const idx = list.findIndex((x) => x && String(x.id) === id);
+                if (idx >= 0) list[idx] = entry;
+                else list.push(entry);
+                samples.edgeDevice.statistic_config = list;
+
+                refreshDataPreview();
+                toast('success', 'Saved edge statistic_config for ' + id + '.');
+            }
+
+            function onUndo() {
+                if (state.mode === 'edge') {
+                    const arr = state.roisNorm[state.activeRoiName];
+                    if (arr.length) arr.pop();
+                    redraw();
+                    return;
+                }
+
+                if (state.tabletPair.length) state.tabletPair.pop();
+                state.lineTypes = [null, null, null, null];
+                state.hoverEdgeIdx = null;
+                redraw();
+            }
+
+            function onClear() {
+                if (state.mode === 'edge') {
+                    state.roisNorm[state.activeRoiName] = [];
+                    redraw();
+                    return;
+                }
+                state.tabletPair = [];
+                state.lineTypes = [null, null, null, null];
+                state.hoverEdgeIdx = null;
+                redraw();
+            }
+
+            function onReload() {
+                if (state.mode === 'edge') {
+                    if (!state.activeCam) {
+                        toast('error', 'No camera selected.');
+                        return;
+                    }
+                    loadEdgeFromSample(state.activeCam);
+                    const src = samples.edgeDevice.frames[state.activeCam];
+                    setFrameSrc(src);
+                    toast('info', 'Reloaded saved data for CAM_' + state.activeCam + '.');
+                } else {
+                    loadTabletFromSample();
+                    setFrameSrc(samples.tabletDevice.frame_base64);
+                    toast('info', 'Reloaded saved tablet data.');
+                }
+            }
+
+            function onCanvasClick(ev) {
+                const p = evToPointOnImageNorm(ev);
+                if (!p) return;
+
+                if (state.mode === 'edge') {
+                    state.roisNorm[state.activeRoiName].push(p);
+                    redraw();
+                    return;
+                }
+
+                if (state.tabletPair.length < 4) {
+                    state.tabletPair.push(p);
+                    if (state.tabletPair.length === 4) {
+                        state.lineTypes = [null, null, null, null];
+                    }
+                    redraw();
+                    return;
+                }
+
+                const idx = getEdgeIndexAtPos(ev);
+                if (idx == null) return;
+                const curr = state.lineTypes[idx];
+                state.lineTypes[idx] = (curr === 'in_out') ? null : 'in_out';
+                redraw();
+            }
+
+            function onCanvasHover(ev) {
+                if (state.mode !== 'tablet' || !state.bgReady || state.tabletPair.length !== 4) {
+                    canvasEl.style.cursor = 'crosshair';
+                    return;
+                }
+                const idx = getEdgeIndexAtPos(ev);
+                if (idx !== state.hoverEdgeIdx) {
+                    state.hoverEdgeIdx = idx;
+                    canvasEl.style.cursor = (idx != null) ? 'pointer' : 'default';
+                    redraw();
+                }
+            }
+
+            function onCanvasLeave() {
+                if (state.hoverEdgeIdx != null) {
+                    state.hoverEdgeIdx = null;
+                    redraw();
+                }
+                updateCursor();
+            }
+
+            roiBtns.forEach((btn) => {
+                btn.addEventListener('click', () => {
+                    if (state.mode !== 'edge') return;
+                    setActiveRoi(btn.dataset.roi);
+                });
+            });
+
+            selectEl.addEventListener('change', function () {
+                if (state.mode !== 'edge') return;
+                setActiveCam(selectEl.value);
+            });
+
+            btnSaveEl.addEventListener('click', onSave);
+            btnUndoEl.addEventListener('click', onUndo);
+            btnClearEl.addEventListener('click', onClear);
+            btnReloadEl.addEventListener('click', onReload);
+
+            canvasEl.addEventListener('click', onCanvasClick);
+            canvasEl.addEventListener('mousemove', onCanvasHover);
+            canvasEl.addEventListener('mouseleave', onCanvasLeave);
+
+            loadPresetBtn.addEventListener('click', function () {
+                const name = presetSelectEl.value;
+                applyPreset(name);
+                toast('info', 'Loaded ' + name + '.');
+            });
+
+            const ro = new ResizeObserver(resize);
+            ro.observe(stageEl);
+            resize();
+
+            refreshDataPreview();
+            applyPreset('tabletDevice');
+        })();
+    </script>
+</body>
+
+</html>

@@ -35,6 +35,10 @@
 
   let lastSig = null;
 
+  function getInnerCardWidget() {
+    try { return self.ctx?.$scope?.aggregatedValueCardWidget || null; } catch (e) { return null; }
+  }
+
   function getCompareKeyConfig() {
     const s = (self.ctx && self.ctx.settings) ? self.ctx.settings : {};
     const deltaName = s.compareDeltaKeyName || s.deltaKeyName || s.compareDeltaKey || s.deltaKey || '';
@@ -228,24 +232,111 @@
   function readStateParams() {
     const sc = self.ctx && self.ctx.stateController;
     if (!sc) return {};
-    try { const p = sc.getStateParams(); if (p && typeof p === 'object') return p; } catch (e) { }
-    try { const p2 = sc.getStateParams('default'); if (p2 && typeof p2 === 'object') return p2; } catch (e) { }
-    return {};
+    let p = {};
+    let p2 = {};
+    try { const x = sc.getStateParams(); if (x && typeof x === 'object') p = x; } catch (e) { }
+    try { const y = sc.getStateParams('default'); if (y && typeof y === 'object') p2 = y; } catch (e) { }
+
+    // Prefer the richer payload, then merge with the other one.
+    const score = (obj) => {
+      if (!obj || typeof obj !== 'object') return 0;
+      let s = 0;
+      if (obj.selectedDeviceMode) s += 10;
+      if (obj.mode) s += 6;
+      if (obj.selectedDeviceId) s += 5;
+      if (Array.isArray(obj.selectedDeviceIds) && obj.selectedDeviceIds.length) s += 8;
+      if (Array.isArray(obj.entities) && obj.entities.length) s += 8;
+      if (Array.isArray(obj.entityIds) && obj.entityIds.length) s += 8;
+      return s;
+    };
+
+    const merged = (score(p2) > score(p)) ? Object.assign({}, p, p2) : Object.assign({}, p2, p);
+
+    // Reconcile ALL-mode flags because TB may split params across getStateParams() and getStateParams('default').
+    const mode1 = String(p.selectedDeviceMode || p.mode || '').toUpperCase();
+    const mode2 = String(p2.selectedDeviceMode || p2.mode || '').toUpperCase();
+    const id1 = String(p.selectedDeviceId || '').trim().toUpperCase();
+    const id2 = String(p2.selectedDeviceId || '').trim().toUpperCase();
+    const idsMerged = getAllDeviceIdsFromState(merged);
+    const idsAll = dedupe([
+      ...getAllDeviceIdsFromState(p),
+      ...getAllDeviceIdsFromState(p2),
+      ...idsMerged
+    ]);
+    const forceAll =
+      mode1 === 'ALL' ||
+      mode2 === 'ALL' ||
+      id1 === '__ALL__' ||
+      id1 === 'ALL' ||
+      id2 === '__ALL__' ||
+      id2 === 'ALL' ||
+      idsAll.length > 1;
+
+    if (forceAll) {
+      merged.selectedDeviceMode = 'ALL';
+      merged.mode = 'ALL';
+      merged.selectedDeviceId = '__ALL__';
+      if (idsAll.length) {
+        merged.selectedDeviceIds = idsAll;
+        merged.selectedDeviceIdsCsv = idsAll.join(',');
+      }
+    }
+
+    return merged;
   }
 
   function getSelectedMode(stateParams) {
-    const m = stateParams.selectedDeviceMode || stateParams.mode;
-    return m === 'ALL' ? 'ALL' : 'SINGLE';
+    const selectedId = String(stateParams.selectedDeviceId || '').trim();
+    const selectedIdUpper = selectedId.toUpperCase();
+    const m = String(stateParams.selectedDeviceMode || stateParams.mode || '').toUpperCase();
+    const idsFromState = getAllDeviceIdsFromState(stateParams);
+    if (m === 'ALL') return 'ALL';
+    if (selectedIdUpper === '__ALL__' || selectedIdUpper === 'ALL') return 'ALL';
+    if (m !== 'SINGLE' && idsFromState.length > 1) return 'ALL';
+    // Fallback: if state is empty but current datasource already contains multiple devices, treat as ALL.
+    if (!selectedId && !m && getDeviceIdsFromCtxDatasources().length > 1) return 'ALL';
+    if (m === 'SINGLE') return 'SINGLE';
+    if (selectedId) return 'SINGLE';
+    return 'SINGLE';
   }
 
   function getSingleIdFromStateOrCtx(stateParams) {
+    if (getSelectedMode(stateParams) === 'ALL') return '';
     const direct = stateParams.selectedDeviceId || stateParams.id || (stateParams.entityId && stateParams.entityId.id);
-    if (direct) return String(direct);
+    if (direct) {
+      const d = String(direct).trim();
+      const du = d.toUpperCase();
+      if (du === '__ALL__' || du === 'ALL') return '';
+      return d;
+    }
     const idsFromCtx = getDeviceIdsFromCtxDatasources();
     return idsFromCtx.length ? String(idsFromCtx[0]) : '';
   }
 
+  function parseDeviceIdsFromStateField(raw) {
+    const ids = [];
+    if (Array.isArray(raw)) {
+      raw.forEach(e => {
+        const id = extractDeviceId(e);
+        if (id) ids.push(id);
+      });
+      return dedupe(ids);
+    }
+    if (raw == null) return [];
+    const asString = String(raw).trim();
+    if (!asString) return [];
+    return dedupe(asString.split(',').map(x => String(x || '').trim()).filter(Boolean));
+  }
+
   function getAllDeviceIdsFromState(stateParams) {
+    const explicit = dedupe([
+      ...parseDeviceIdsFromStateField(stateParams.selectedDeviceIds),
+      ...parseDeviceIdsFromStateField(stateParams.deviceIds),
+      ...parseDeviceIdsFromStateField(stateParams.selectedDeviceIdsCsv),
+      ...parseDeviceIdsFromStateField(stateParams.deviceIdsCsv)
+    ]);
+    if (explicit.length) return explicit;
+
     const list = stateParams.entities || stateParams.entityIds || [];
     const ids = [];
     if (Array.isArray(list)) list.forEach(e => { const id = extractDeviceId(e); if (id) ids.push(id); });
@@ -619,6 +710,43 @@
 
     sub.data = [sub.data[0]];
     sub.data[0].data = [[now, value]];
+
+    // Some card templates read current value from latestData instead of data.
+    // Update only the primary/non-compare latest key to keep built-in delta behavior.
+    if (Array.isArray(sub.latestData) && sub.latestData.length) {
+      const cfg = getCompareKeyConfig();
+      const keyNorm = normalizeKeyName(getConfiguredKeyName()).toLowerCase();
+      const wantDeltaNorm = normalizeKeyName(cfg.deltaName).toLowerCase();
+      const wantPctNorm = normalizeKeyName(cfg.percentName).toLowerCase();
+
+      function isCompareLike(dk) {
+        const raw = String(dk?.label || dk?.name || '').toLowerCase();
+        const nameNorm = normalizeKeyName(dk?.name || dk?.label || '').toLowerCase();
+        if (!raw && !nameNorm) return false;
+        if (wantDeltaNorm && nameNorm === wantDeltaNorm) return true;
+        if (wantPctNorm && nameNorm === wantPctNorm) return true;
+        if (raw.includes('%') || raw.includes('percent') || raw.includes('pct') || raw.includes('ratio')) return true;
+        if (raw.includes('delta') || raw.includes('diff') || raw.includes('change') || raw.includes('compare') || raw.includes('vs') ||
+            raw.includes('chenh') || raw.includes('chênh') || raw.includes('so sanh') || raw.includes('so sánh') ||
+            raw.includes('増減') || raw.includes('差分')) return true;
+        return false;
+      }
+
+      let targetIdx = -1;
+      let firstNonCompareIdx = -1;
+      for (let i = 0; i < sub.latestData.length; i++) {
+        const dk = sub.latestData[i]?.dataKey;
+        const dkNorm = normalizeKeyName(dk?.name || dk?.label || '').toLowerCase();
+        const isCompare = isCompareLike(dk);
+        if (!isCompare && firstNonCompareIdx === -1) firstNonCompareIdx = i;
+        if (!isCompare && dkNorm && dkNorm === keyNorm) {
+          targetIdx = i;
+          break;
+        }
+      }
+      if (targetIdx === -1) targetIdx = firstNonCompareIdx;
+      if (targetIdx >= 0) sub.latestData[targetIdx].data = [[now, value]];
+    }
   }
 
   function updateLatestCompareKeys(currentValue, prevValue) {
@@ -672,8 +800,9 @@
   }
 
   function renderCard() {
-    try { self.ctx.$scope.aggregatedValueCardWidget.onDataUpdated(); } catch (e) { }
-    try { self.ctx.$scope.aggregatedValueCardWidget.onLatestDataUpdated(); } catch (e) { }
+    const w = getInnerCardWidget();
+    try { if (w && typeof w.onDataUpdated === 'function') w.onDataUpdated(); } catch (e) { }
+    try { if (w && typeof w.onLatestDataUpdated === 'function') w.onLatestDataUpdated(); } catch (e) { }
     try { self.ctx.detectChanges(); } catch (e) { }
   }
 
@@ -918,7 +1047,8 @@
 
   // ========= Lifecycle =========
   self.onInit = function () {
-    self.ctx.$scope.aggregatedValueCardWidget.onInit();
+    const w = getInnerCardWidget();
+    try { if (w && typeof w.onInit === 'function') w.onInit(); } catch (e) { }
     registerDebugCard();
     ensureOverlay();
 
@@ -986,8 +1116,14 @@
   self.onDataUpdated = function () { scheduleRefresh('onDataUpdated'); };
 
   self.onLatestDataUpdated = function () { scheduleRefresh('onLatestDataUpdated'); };
-  self.onResize = function () { self.ctx.$scope.aggregatedValueCardWidget.onResize(); };
-  self.onEditModeChanged = function () { self.ctx.$scope.aggregatedValueCardWidget.onEditModeChanged(); };
+  self.onResize = function () {
+    const w = getInnerCardWidget();
+    try { if (w && typeof w.onResize === 'function') w.onResize(); } catch (e) { }
+  };
+  self.onEditModeChanged = function () {
+    const w = getInnerCardWidget();
+    try { if (w && typeof w.onEditModeChanged === 'function') w.onEditModeChanged(); } catch (e) { }
+  };
 
   self.onDestroy = function () {
     if (refreshTimer) {
@@ -1018,7 +1154,8 @@
       overlayTimer = null;
     }
 
-    self.ctx.$scope.aggregatedValueCardWidget.onDestroy();
+    const w = getInnerCardWidget();
+    try { if (w && typeof w.onDestroy === 'function') w.onDestroy(); } catch (e) { }
   };
 
   async function processUpdate(scheduledSeq) {

@@ -81,6 +81,7 @@ self.onDestroy = function () {
         clearTimeout(self.persistTimer);
         self.persistTimer = null;
     }
+    persistReqSeq++;
     teardownCustomDropdowns();
     try { ensureStoreDropdownManager().close(); } catch (e) { }
 };
@@ -230,6 +231,7 @@ function isDeviceSelectEmpty() {
 
 let devicesReqSeq = 0;
 let typesReqSeq = 0;
+let persistReqSeq = 0;
 
 async function loadDevicesByType(type, preferredDeviceId) {
     if (!type) {
@@ -269,7 +271,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
                 { value: '__ALL__', label: `全デバイス` },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
-            defaultSelection = devices.length ? devices[0].id : '__ALL__';
+            defaultSelection = '__ALL__';
         }
 
         // No placeholder - start directly with options
@@ -331,7 +333,6 @@ function ensureStoreDropdownManager() {
         var topDoc = topWin.document;
         var style = topDoc.getElementById('tb-store-dd-styles');
         var css =
-            '.tb-store-dd-overlay{position:fixed;inset:0;background:transparent;z-index:2147483647;}' +
             '.tb-store-dd{position:fixed;background:#fff;border-radius:6px;padding:8px;min-width:220px;' +
             'box-shadow:0 10px 24px rgba(0,0,0,.2);box-sizing:border-box;z-index:2147483648;}' +
             '.tb-store-dd-list{display:block;max-height:240px;overflow:auto;padding-right:4px;}' +
@@ -360,10 +361,11 @@ function ensureStoreDropdownManager() {
             if (!selectEl || !anchorEl) return;
             ensureStyles();
             var topDoc = topWin.document;
-            var overlay = topDoc.createElement('div');
-            overlay.className = 'tb-store-dd-overlay';
-            topDoc.body.appendChild(overlay);
-            this.overlay = overlay;
+
+            // Cleanup stale nodes left by previous widget sessions.
+            Array.from(topDoc.querySelectorAll('.tb-store-dd-overlay, .tb-store-dd')).forEach(function (el) {
+                try { el.remove(); } catch (e) { }
+            });
 
             var dropdown = topDoc.createElement('div');
             dropdown.className = 'tb-store-dd';
@@ -392,7 +394,7 @@ function ensureStoreDropdownManager() {
                     e.stopPropagation();
                     if (selectEl.value !== opt.value) {
                         selectEl.value = opt.value;
-                        selectEl.dispatchEvent(new Event('change'));
+                        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
                     }
                     mgr.close();
                 });
@@ -403,78 +405,54 @@ function ensureStoreDropdownManager() {
 
             var selfMgr = this;
             var onEsc = function (e) { if (e.key === 'Escape') selfMgr.close(); };
-            var onOutside = function (e) { if (e.target === overlay) selfMgr.close(); };
+            var onOutside = function (e) {
+                if (!selfMgr.dropdown) return;
+                var t = e.target;
+                if (t && selfMgr.dropdown.contains(t)) return;
+                selfMgr.close();
+            };
             var onResize = function () { selfMgr.close(); };
-            (window.top || window).addEventListener('keydown', onEsc, true);
-            (window.top || window).addEventListener('resize', onResize);
-            overlay.addEventListener('click', onOutside);
+            var topTarget = (window.top || window);
+            topTarget.addEventListener('keydown', onEsc, true);
+            topTarget.addEventListener('resize', onResize);
+            topTarget.addEventListener('scroll', onResize, true);
+            topDoc.addEventListener('mousedown', onOutside, true);
             this._listeners = [
-                [window.top || window, 'keydown', onEsc, true],
-                [window.top || window, 'resize', onResize, false],
-                [overlay, 'click', onOutside, false]
+                [topTarget, 'keydown', onEsc, true],
+                [topTarget, 'resize', onResize, false],
+                [topTarget, 'scroll', onResize, true],
+                [topDoc, 'mousedown', onOutside, true]
             ];
         },
         position: function (anchorEl) {
             if (!this.dropdown || !anchorEl) return;
 
-            // Get anchor rect in iframe coordinates
             var a = anchorEl.getBoundingClientRect();
-
-            // Get iframe position in top window
             var fe = window.frameElement;
             var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
-
-            // Account for iframe border (clientLeft/clientTop)
             var iframeBorderLeft = fe ? (fe.clientLeft || 0) : 0;
             var iframeBorderTop = fe ? (fe.clientTop || 0) : 0;
 
-            // DEBUG: Log to diagnose offset issue
-            console.log('[DD Position]', {
-                anchor: { left: a.left, top: a.top, bottom: a.bottom, width: a.width },
-                iframe: { left: f.left, top: f.top },
-                iframeBorder: { left: iframeBorderLeft, top: iframeBorderTop },
-                calculated: { left: f.left + a.left + iframeBorderLeft, top: f.top + a.bottom + iframeBorderTop }
-            });
-
-            // Convert iframe coordinates to top window coordinates
-            // Add iframe border offset to account for iframe's border
             var gap = 6;
             var left = f.left + a.left + iframeBorderLeft;
             var top = f.top + a.bottom + iframeBorderTop + gap;
 
-            // Get viewport dimensions
-            var vw = (window.top || window).innerWidth;
             var vh = (window.top || window).innerHeight;
-
             var dd = this.dropdown;
-            
-            // Set width FIRST to match anchor width (before measuring offsetWidth)
+
             var dropdownWidth = Math.max(160, a.width);
             dd.style.width = dropdownWidth + 'px';
-            
-            // Now measure actual dimensions after width is set
-            var ddW = dd.offsetWidth || dropdownWidth;
-            var ddH = dd.offsetHeight || 200;
 
-            // DON'T shift left if dropdown is wide - keep aligned with anchor
-            // Only adjust if dropdown would go completely off-screen
-            var finalLeft = left;
+            var ddH = dd.offsetHeight || 200;
             var finalTop = top;
-            
-            // If dropdown goes off right edge, allow it to extend or scroll
-            // Don't shift it left as that breaks alignment with anchor
-            
-            // If dropdown goes off bottom, flip it above anchor
             if (top + ddH + gap > vh) {
                 finalTop = Math.max(gap, f.top + a.top + iframeBorderTop - ddH - gap);
             }
 
-            // Set position
-            dd.style.left = Math.max(gap, finalLeft) + 'px';
+            dd.style.left = Math.max(gap, left) + 'px';
             dd.style.top = Math.max(gap, finalTop) + 'px';
         },
         close: function () {
-            if (!this.overlay) return;
             try {
                 if (this._listeners && this._listeners.forEach) {
                     this._listeners.forEach(function (arr) {
@@ -482,8 +460,14 @@ function ensureStoreDropdownManager() {
                     });
                 }
             } catch (e) { }
-            try { this.overlay.remove(); } catch (e) { }
+            try { if (this.overlay) this.overlay.remove(); } catch (e) { }
             try { if (this.dropdown) this.dropdown.remove(); } catch (e) { }
+            try {
+                var topDoc = (window.top || window).document;
+                Array.from(topDoc.querySelectorAll('.tb-store-dd-overlay, .tb-store-dd')).forEach(function (el) {
+                    try { el.remove(); } catch (e) { }
+                });
+            } catch (e) { }
             this.overlay = null;
             this.dropdown = null;
             this._listeners = [];
@@ -498,30 +482,22 @@ function wireCustomDropdowns() {
     if (!self.rootEl || self._dropdownHandler) return;
     var mgr = ensureStoreDropdownManager();
     self._dropdownHandler = function (e) {
-        // Check device card first to ensure correct priority
-        var deviceCard = e.target.closest('.device-card');
-        var storeCard = e.target.closest('.store-card');
+        var target = e && e.target;
+        var el = (target && target.nodeType === 1) ? target : (target && target.parentElement ? target.parentElement : null);
+        if (!el || typeof el.closest !== 'function') return;
 
-        console.log('[Click Handler]', {
-            target: e.target.tagName,
-            hasDevice: !!deviceCard,
-            hasStore: !!storeCard
-        });
+        var deviceCard = el.closest('.device-card');
+        var storeCard = el.closest('.store-card');
 
-        // Device card takes priority
         if (deviceCard && self.deviceSelect) {
             e.stopPropagation();
-            console.log('[Opening Device DD]', deviceCard.className);
             mgr.open(self.deviceSelect, deviceCard, 'blue');
             return;
         }
 
-        // Then check store card
         if (storeCard && self.typeSelect) {
             e.stopPropagation();
-            console.log('[Opening Store DD]', storeCard.className);
             mgr.open(self.typeSelect, storeCard, 'red');
-            return;
         }
     };
     self.rootEl.addEventListener('click', self._dropdownHandler);
@@ -803,21 +779,25 @@ function persistSelection(options) {
 
     // Call async version
     if (self.persistTimer) clearTimeout(self.persistTimer);
+    const myPersistSeq = ++persistReqSeq;
     self.persistTimer = setTimeout(() => {
-        persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName);
+        persistSelectionAsync(myPersistSeq, selectedType, selectedDeviceId, selectedDeviceName);
     }, 150);
 }
 
-async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDeviceName) {
+async function persistSelectionAsync(myPersistSeq, selectedType, selectedDeviceId, selectedDeviceName) {
+    if (myPersistSeq !== persistReqSeq) return;
     try {
         // Note: selectedDeviceType is already included in the 'default' state params below
         // No need to update it separately to avoid multiple state change events
 
         // ========= ALL DEVICES =========
         if (selectedDeviceId === '__ALL__') {
+            if (myPersistSeq !== persistReqSeq) return;
             // //console.log('[store_type] 📋 全デバイス selected for type:', selectedType);
 
             const devices = self.currentDevices || [];
+            const deviceIds = devices.map(d => String(d.id || '')).filter(Boolean);
             const entityList = devices.map(d => ({
                 entityType: 'DEVICE',
                 id: d.id
@@ -829,16 +809,18 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
                 // For timeseries widgets - multiple formats for compatibility
                 entities: entityList,
                 entityIds: entityList, // Array format for entity alias
-                entityId: entityList.length > 0 ? { entityType: 'DEVICE', id: entityList[0].id } : null,
+                entityId: null,
 
-                // Entity info (first entity as fallback, or empty)
+                // Do not pin to the first device in ALL mode.
                 entityType: 'DEVICE',
-                id: entityList.length > 0 ? entityList[0].id : null,
+                id: null,
 
                 // Custom params (for static widgets - read via getStateParams())
                 selectedDeviceMode: 'ALL',
                 selectedDeviceType: selectedType,
                 selectedDeviceId: '__ALL__',
+                selectedDeviceIds: deviceIds,
+                selectedDeviceIdsCsv: deviceIds.join(','),
                 selectedDeviceName: selectedDeviceName,
 
                 // Additional info
@@ -872,6 +854,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
 
         // ========= SINGLE DEVICE =========
         if (selectedDeviceId) {
+            if (myPersistSeq !== persistReqSeq) return;
             //console.log('[store_type] ➡️ Entering SINGLE device block, deviceId:', selectedDeviceId);
 
             // ✅ ALL params in ONE object for 'default' state
@@ -889,6 +872,8 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
                 selectedDeviceMode: 'SINGLE',
                 selectedDeviceType: selectedType,
                 selectedDeviceId: selectedDeviceId,
+                selectedDeviceIds: [selectedDeviceId],
+                selectedDeviceIdsCsv: String(selectedDeviceId),
                 selectedDeviceName: selectedDeviceName,
 
                 // Mode shorthand
@@ -906,6 +891,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
             } catch (e) {
                 //console.warn('[store_type] Could not fetch device label');
             }
+            if (myPersistSeq !== persistReqSeq) return;
 
             // Update stateParams with label
             stateParams.selectedDeviceLabel = selectedDeviceLabel;
@@ -938,6 +924,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
         // //console.warn('[store_type] No device selected. Clearing related states.');
 
         // ✅ ALL params in ONE object - set to null/NONE for clearing
+        if (myPersistSeq !== persistReqSeq) return;
         const stateParams = {
             entityType: null,
             id: null,

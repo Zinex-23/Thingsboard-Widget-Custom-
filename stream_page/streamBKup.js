@@ -6,8 +6,6 @@ self.onInit = function () {
   const BASE_DOMAIN = "https://visiflow-cam.m-tech.com.vn";
   const PROFILE_KEY = "default";
   const IFRAME_SANDBOX = ""; // ví dụ: "allow-scripts allow-same-origin"
-  const CONFIG_STATE_ID_JP = "configuration_static";
-  const CONFIG_STATE_ID_EN = "configurationistatic___copy_1";
 
   /* ================== DOM ================== */
 
@@ -52,10 +50,10 @@ self.onInit = function () {
     zIndex: "2"
   });
   liveBlocker.innerHTML = `
-    <button type="button" data-role="config-btn" aria-label="Open configuration page" style="max-width:520px;width:100%;line-height:1.55;background:#ffffff;border:2px solid #ED1C24;border-radius:12px;padding:20px;box-shadow:0 10px 28px rgba(237,28,36,0.18);cursor:pointer;color:#ED1C24;text-align:center;">
+    <div style="max-width:520px;line-height:1.55;background:#ffffff;border:2px solid #ED1C24;border-radius:12px;padding:20px;box-shadow:0 10px 28px rgba(237,28,36,0.18);">
       <div data-role="title" style="font-size:20px;font-weight:700;margin-bottom:8px;color:#ED1C24;"></div>
       <div data-role="desc" style="font-size:14px;color:#ED1C24;"></div>
-    </button>
+    </div>
   `;
   iframeWrapper.appendChild(liveBlocker);
 
@@ -65,7 +63,6 @@ self.onInit = function () {
   let lastMode = null; // 'edge' | 'tablet' | 'config'
   let currentDevice = null;
   let lastLang = "en";
-  let lastOpenConfigAt = 0;
 
   /* ================== HELPERS ================== */
 
@@ -120,66 +117,17 @@ self.onInit = function () {
     return l.startsWith("ja") ? "ja" : "en";
   }
 
-  function normalizeLocate(v) {
-    if (v == null) return null;
-    const s = String(v).trim().toUpperCase();
-    if (s.startsWith("JP") || s.startsWith("JA")) return "JP";
-    if (s.startsWith("EN")) return "EN";
-    return null;
-  }
-
-  function detectLocate() {
-    const candidates = [];
-
-    try {
-      const topWin = window.top || window;
-      if (topWin && topWin.locate != null) candidates.push(topWin.locate);
-    } catch {}
-
-    if (window.locate != null) candidates.push(window.locate);
-    if (ctx.settings?.locate != null) candidates.push(ctx.settings.locate);
-    if (ctx.widgetConfig?.settings?.locate != null) {
-      candidates.push(ctx.widgetConfig.settings.locate);
-    }
-    const langLike = detectLang();
-    candidates.push(langLike === "ja" ? "JP" : "EN");
-
-    for (const c of candidates) {
-      const loc = normalizeLocate(c);
-      if (loc) return loc;
-    }
-    return "EN";
-  }
-
-  function openConfigState() {
-    if (
-      !ctx.stateController ||
-      typeof ctx.stateController.openState !== "function"
-    ) {
-      return;
-    }
-
-    const now = Date.now();
-    if (now - lastOpenConfigAt < 600) return;
-    lastOpenConfigAt = now;
-
-    const locate = detectLocate();
-    const targetState =
-      locate === "JP" ? CONFIG_STATE_ID_JP : CONFIG_STATE_ID_EN;
-    ctx.stateController.openState(targetState, {}, false);
-  }
-
   function updateLiveBlocker(lang) {
     const title = liveBlocker.querySelector('[data-role="title"]');
     const desc = liveBlocker.querySelector('[data-role="desc"]');
     if (lang === "ja") {
       title.textContent = "設定";
       desc.textContent =
-        "クリックして設定ページへ移動し、is_live_camera を true に変更してください。";
+        "視聴するには設定ページで is_live_camera を true に変更してください。";
     } else {
       title.textContent = "Live stream is disabled";
       desc.textContent =
-        "Click to open Configuration and set is_live_camera = true.";
+        "To watch, enable is_live_camera = true on the Configuration page.";
     }
   }
 
@@ -194,11 +142,6 @@ self.onInit = function () {
 
   function hideLiveBlocker() {
     liveBlocker.style.display = "none";
-  }
-
-  const configBtn = liveBlocker.querySelector('[data-role="config-btn"]');
-  if (configBtn) {
-    configBtn.addEventListener("click", openConfigState);
   }
 
   /* ================== EDGE ================== */

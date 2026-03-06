@@ -28,6 +28,9 @@ var POLL_SELECTION_ENABLED = true;        // lắng nghe switch device selector 
 var POLL_INTERVAL_MS = 350;               // polling signature
 var LOADING_TEXT = 'Loading...';          // overlay text
 var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp để tránh stale subscription
+var API_FETCH_TIMEOUT_MS = 18000;         // timeout mỗi request telemetry
+var ALL_FETCH_CONCURRENCY = 6;            // số request device chạy song song
+var LOADING_WATCHDOG_MS = 25000;          // auto-hide loading nếu request treo bất thường
 
 // ===========================================
 
@@ -69,6 +72,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   var __updateSeq = 0;
   var __pendingUpdate = null;
   var __activeAbort = null;
+  var __loadingRunId = 0;
+  var __loadingWatchdog = null;
+  var __lastKnownAllIds = [];
 
   // ---------- Utils (ES5) ----------
   function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
@@ -119,13 +125,58 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return {};
   }
   function getAllDeviceIdsFromState(stateParams) {
-    var list = stateParams.entities || stateParams.entityIds || [];
     var ids = [];
-    if (Array.isArray(list)) {
-      list.forEach(function(e){ var id=extractDeviceId(e); if(id) ids.push(id); });
-    } else {
-      var id2=extractDeviceId(list); if(id2) ids.push(id2);
+    function pushFrom(value){
+      if (Array.isArray(value)) {
+        for (var i=0;i<value.length;i++){
+          var id = extractDeviceId(value[i]);
+          if (id) ids.push(id);
+        }
+        return;
+      }
+      var one = extractDeviceId(value);
+      if (one) ids.push(one);
     }
+
+    pushFrom(stateParams.entities);
+    pushFrom(stateParams.entityIds);
+    pushFrom(stateParams.selectedDeviceIds);
+
+    var csv = stateParams.selectedDeviceIdsCsv;
+    if (typeof csv === 'string' && csv.trim()) {
+      var arr = csv.split(',');
+      for (var c=0;c<arr.length;c++){
+        var token = String(arr[c] || '').trim();
+        if (token) ids.push(token);
+      }
+    }
+
+    if (!ids.length) {
+      try {
+        var sub = self.ctx && self.ctx.defaultSubscription;
+        var dss = sub && sub.datasources;
+        if (Array.isArray(dss)) {
+          for (var d=0; d<dss.length; d++){
+            var dId = extractDeviceId(dss[d] && (dss[d].entityId || dss[d].entity || dss[d]));
+            if (dId) ids.push(dId);
+          }
+        }
+      } catch(_){}
+    }
+
+    if (!ids.length) {
+      try {
+        var ds2 = self.ctx && (self.ctx.datasources || self.ctx.dataSources || self.ctx.dataSource);
+        if (Array.isArray(ds2)) {
+          for (var k=0; k<ds2.length; k++){
+            var e = ds2[k] && (ds2[k].entity || ds2[k].entityId || ds2[k].entityID || ds2[k]);
+            var id2 = extractDeviceId(e);
+            if (id2) ids.push(id2);
+          }
+        }
+      } catch(_){}
+    }
+
     return dedupe(ids);
   }
   function getSelectedMode(stateParams) {
@@ -133,6 +184,8 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     var m = stateParams.selectedDeviceMode || stateParams.mode;
     if (m === 'ALL') return 'ALL';
     if (stateParams.selectedDeviceId === '__ALL__') return 'ALL';
+    if (Array.isArray(stateParams.selectedDeviceIds) && stateParams.selectedDeviceIds.length > 1) return 'ALL';
+    if (typeof stateParams.selectedDeviceIdsCsv === 'string' && stateParams.selectedDeviceIdsCsv.indexOf(',') >= 0) return 'ALL';
     var list = stateParams.entities || stateParams.entityIds || [];
     if (Array.isArray(list) && list.length > 1) return 'ALL';
     return 'SINGLE';
@@ -166,12 +219,15 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   function buildSignature() {
     var st = readStateParams();
     var mode = getSelectedMode(st);
-    var singleId = getSingleDeviceIdFromStateOrCtx(st) || '';
-    var allIds = (mode === 'ALL') ? getAllDeviceIdsFromState(st).join(',') : '';
+    var singleId = (mode === 'ALL') ? '' : (getSingleDeviceIdFromStateOrCtx(st) || '');
+    var allIdsArr = (mode === 'ALL') ? getAllDeviceIdsFromState(st).slice() : [];
+    allIdsArr.sort();
+    var allIds = allIdsArr.join(',');
     return [
       'mode=' + mode,
       'single=' + singleId,
       'all=' + allIds,
+      'type=' + String(st.selectedDeviceType || st.type || ''),
       'series=' + String(SERIES),
       'gb=' + String(GROUP_BY_DATASOURCE),
       'az=' + String(AUTO_ZOOM_ENABLED),
@@ -252,6 +308,72 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   function hideLoading(){
     var el = ensureLoadingOverlay();
     if (el) el.style.display = 'none';
+  }
+  function hideAllLoadingOverlays(){
+    try {
+      var list = document.querySelectorAll('.tb-hist__loading');
+      for (var i=0;i<list.length;i++) {
+        list[i].style.display = 'none';
+      }
+    } catch(_){}
+  }
+  function startLoading(runId){
+    __loadingRunId = runId;
+    showLoading();
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_){}
+      __loadingWatchdog = null;
+    }
+    __loadingWatchdog = setTimeout(function(){
+      // Khi request bị pending quá lâu, cưỡng bức abort + hide để tránh kẹt spinner.
+      if (runId !== __loadingRunId) return;
+      try { if (__activeAbort) __activeAbort.abort(); } catch(_){}
+      hideAllLoadingOverlays();
+    }, LOADING_WATCHDOG_MS);
+  }
+  function stopLoading(runId){
+    if (runId !== __loadingRunId) return;
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_){}
+      __loadingWatchdog = null;
+    }
+    hideAllLoadingOverlays();
+  }
+
+  function createTimedSignal(parentSignal, timeoutMs){
+    var ctrl = new AbortController();
+    var timeoutId = null;
+    var timedOut = false;
+    var parentHandler = null;
+
+    function abortSafe(){ try { ctrl.abort(); } catch(_){} }
+
+    if (parentSignal) {
+      if (parentSignal.aborted) abortSafe();
+      else {
+        parentHandler = function(){ abortSafe(); };
+        try { parentSignal.addEventListener('abort', parentHandler); } catch(_){}
+      }
+    }
+    if (isFiniteNumber(timeoutMs) && timeoutMs > 0) {
+      timeoutId = setTimeout(function(){
+        timedOut = true;
+        abortSafe();
+      }, timeoutMs);
+    }
+    return {
+      signal: ctrl.signal,
+      isTimedOut: function(){ return timedOut; },
+      cleanup: function(){
+        if (timeoutId) {
+          try { clearTimeout(timeoutId); } catch(_){}
+          timeoutId = null;
+        }
+        if (parentSignal && parentHandler) {
+          try { parentSignal.removeEventListener('abort', parentHandler); } catch(_){}
+        }
+      }
+    };
   }
 
   // ---------- Session Storage Helpers (SAFE) ----------
@@ -417,6 +539,11 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       try { __activeAbort.abort(); } catch(_e){}
       __activeAbort = null;
     }
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_e){}
+      __loadingWatchdog = null;
+    }
+    hideAllLoadingOverlays();
   };
 
   // ---------- Header ----------
@@ -576,13 +703,13 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return '';
   }
 
-  // {male:[], female:[]}
+  // {male:[], female:[], unknown:[]}
   function splitAgesByGender(payload) {
     if (payload && typeof payload === 'object' && 'v' in payload) payload = payload.v;
     if (payload && typeof payload === 'object' && 'value' in payload && Object.keys(payload).length === 1) payload = payload.value;
     if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch(_e){} }
 
-    var out = { male: [], female: [] };
+    var out = { male: [], female: [], unknown: [] };
 
     // kiểu cũ male_ages / female_ages
     if (payload && typeof payload === 'object') {
@@ -607,15 +734,24 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
     }
 
-    if (Array.isArray(ages) && Array.isArray(genders) && ages.length === genders.length) {
+    if (Array.isArray(ages) && Array.isArray(genders) && genders.length) {
       for (var i=0;i<ages.length;i++) {
         var n = Number(ages[i]);
-        var g = normalizeGenderStr(String(genders[i]));
+        var g = normalizeGenderStr(String(genders[i] == null ? '' : genders[i]));
         if (!isNaN(n) && n>=AGE_MIN && n<=AGE_MAX) {
           if (g==='male') out.male.push(n);
           else if (g==='female') out.female.push(n);
+          else out.unknown.push(n);
         }
       }
+      return out;
+    }
+
+    if (Array.isArray(ages) && ages.length) {
+      var agesOnlyFromAgesField = parseAges(ages);
+      if (SERIES === 'male') out.male = out.male.concat(agesOnlyFromAgesField);
+      else if (SERIES === 'female') out.female = out.female.concat(agesOnlyFromAgesField);
+      else out.unknown = out.unknown.concat(agesOnlyFromAgesField);
       return out;
     }
 
@@ -623,6 +759,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     var agesOnly = parseAges(payload);
     if (SERIES === 'male') out.male = out.male.concat(agesOnly);
     else if (SERIES === 'female') out.female = out.female.concat(agesOnly);
+    else out.unknown = out.unknown.concat(agesOnly);
     return out;
 
     function safeParseArray(x){
@@ -647,6 +784,14 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       var parts = s.split(','), out2 = [];
       for (var j=0;j<parts.length;j++){ if(!parts[j]) continue; var nn=Number(parts[j]); if(!isNaN(nn)) out2.push(clamp(nn, AGE_MIN, AGE_MAX)); }
       return out2;
+    }
+    if (val && typeof val === 'object') {
+      if (Array.isArray(val.ages) || typeof val.ages === 'string') {
+        return parseAges(val.ages);
+      }
+      if (val.values && (Array.isArray(val.values.ages) || typeof val.values.ages === 'string')) {
+        return parseAges(val.values.ages);
+      }
     }
     if (val && typeof val === 'object' && (val.values || val.male_ages || val.female_ages)) {
       var ms = parseAges(val.male_ages || (val.values && val.values.male_ages) || []);
@@ -681,7 +826,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       if (sum>yMax) yMax=sum;
     }
 
-    var colors = ['#59B5FF','#FF96D0'];
+    var palette = ['#59B5FF','#FF96D0','#94A3B8','#22C55E','#F59E0B','#A78BFA'];
+    var colors = [];
+    for (var ci=0; ci<Slen; ci++) colors.push(palette[ci % palette.length]);
 
     state.labels = labels;
     state.seriesLabels = seriesLabels;
@@ -1080,65 +1227,90 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   }
 
   // ---------- ALL DEVICES FETCH ----------
+  async function fetchDeviceGroups(deviceId, startTs, endTs, urlKeys, token, parentSignal){
+    var url =
+      `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries` +
+      `?keys=${urlKeys}` +
+      `&startTs=${startTs}` +
+      `&endTs=${endTs}` +
+      `&limit=${ALL_FETCH_LIMIT}&agg=${ALL_FETCH_AGG}`;
+
+    var timed = createTimedSignal(parentSignal, API_FETCH_TIMEOUT_MS);
+    try{
+      var res = await fetch(url, {
+        method:'GET',
+        signal: timed.signal,
+        headers:{
+          'Content-Type':'application/json',
+          ...(token ? {'X-Authorization':'Bearer '+token} : {})
+        }
+      });
+      if (!res.ok) return [];
+
+      var data = await res.json();
+      var groups = [];
+      // data[key] => [{ts,value}]
+      for (var ki=0; ki<ALL_KEYS.length; ki++){
+        var k = ALL_KEYS[ki];
+        var arr = (data && data[k]) ? data[k] :
+                  (data && data[String(k).toLowerCase()]) ? data[String(k).toLowerCase()] :
+                  (data && data[String(k).toUpperCase()]) ? data[String(k).toUpperCase()] : [];
+        if (!arr || !arr.length) continue;
+
+        var g = {
+          id: 'ALL|' + deviceId + '|' + k,
+          label: deviceId + ' / ' + k,
+          dsName: deviceId,
+          keyName: k,
+          payloads: []
+        };
+        for (var i=0;i<arr.length;i++){
+          var p = arr[i];
+          if (!p) continue;
+          var ts = Number(p.ts);
+          var v = (p.value != null) ? p.value : p.v;
+          if (!isFiniteNumber(ts)) continue;
+          if (!(ts >= startTs && ts <= endTs)) continue;
+          g.payloads.push({ ts: ts, v: v });
+        }
+        if (g.payloads.length) groups.push(g);
+      }
+      return groups;
+    }catch(_e){
+      if (DEBUG && timed.isTimedOut()) {
+        try { console.warn('[histogram] telemetry timeout for device', deviceId); } catch(_){}
+      }
+      return [];
+    } finally {
+      timed.cleanup();
+    }
+  }
+
   async function fetchAllDevicesGroups(deviceIds, rng, signal){
     var seq = ++__fetchSeq;
     var token = safeGetToken();
     var startTs = Number(rng.start), endTs = Number(rng.end);
     var keys = ALL_KEYS.join(',');
     var urlKeys = encodeURIComponent(keys);
-
+    var queue = (deviceIds||[]).slice();
     var outGroups = [];
 
-    await Promise.all((deviceIds||[]).map(async function(deviceId){
-      var url =
-        `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries` +
-        `?keys=${urlKeys}` +
-        `&startTs=${startTs}` +
-        `&endTs=${endTs}` +
-        `&limit=${ALL_FETCH_LIMIT}&agg=${ALL_FETCH_AGG}`;
+    var workerCount = Math.max(1, Math.min(ALL_FETCH_CONCURRENCY, queue.length || 1));
+    async function worker(){
+      while (queue.length) {
+        if (signal && signal.aborted) return;
+        var deviceId = queue.shift();
+        if (!deviceId) continue;
 
-      try{
-        var res = await fetch(url, {
-          method:'GET',
-          signal: signal,
-          headers:{
-            'Content-Type':'application/json',
-            ...(token ? {'X-Authorization':'Bearer '+token} : {})
-          }
-        });
-        if (!res.ok) return;
-
-        var data = await res.json();
-        // data[key] => [{ts,value}]
-        for (var ki=0; ki<ALL_KEYS.length; ki++){
-          var k = ALL_KEYS[ki];
-          var arr = (data && data[k]) ? data[k] :
-                    (data && data[String(k).toLowerCase()]) ? data[String(k).toLowerCase()] :
-                    (data && data[String(k).toUpperCase()]) ? data[String(k).toUpperCase()] : [];
-          if (!arr || !arr.length) continue;
-
-          var g = {
-            id: 'ALL|' + deviceId + '|' + k,
-            label: deviceId + ' / ' + k,
-            dsName: deviceId,
-            keyName: k,
-            payloads: []
-          };
-          for (var i=0;i<arr.length;i++){
-            var p = arr[i];
-            if (!p) continue;
-            var ts = Number(p.ts);
-            var v = (p.value != null) ? p.value : p.v;
-            if (!isFiniteNumber(ts)) continue;
-            if (!(ts >= startTs && ts <= endTs)) continue;
-            g.payloads.push({ ts: ts, v: v });
-          }
-          if (g.payloads.length) outGroups.push(g);
-        }
-      }catch(_e){
-        if (_e && _e.name === 'AbortError') return;
+        var groups = await fetchDeviceGroups(deviceId, startTs, endTs, urlKeys, token, signal);
+        if (signal && signal.aborted) return;
+        if (groups && groups.length) Array.prototype.push.apply(outGroups, groups);
       }
-    }));
+    }
+
+    var workers = [];
+    for (var wi=0; wi<workerCount; wi++) workers.push(worker());
+    await Promise.all(workers);
 
     if (seq !== __fetchSeq) return null; // superseded
     return outGroups;
@@ -1175,30 +1347,33 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   }
 
   async function runUpdate(mySeq) {
-    // Loading: luôn show trước, hide khi xong build + start anim
-    showLoading();
-
-    refreshHeader();
-    ui.timeWindowText = getTimeWindowText(self.ctx);
-
-    var stParams = readStateParams();
-    var mode = getSelectedMode(stParams);
-
-    // Range tính từ timewindow (không cần groups)
-    var rng = currentRangeFromTB(self.ctx, null);
-
-    var groups = [];
-
+    startLoading(mySeq);
     try {
+      refreshHeader();
+      ui.timeWindowText = getTimeWindowText(self.ctx);
+
+      var stParams = readStateParams();
+      var mode = getSelectedMode(stParams);
+
+      // Range tính từ timewindow (không cần groups)
+      var rng = currentRangeFromTB(self.ctx, null);
+
+      var groups = [];
+
       if (__activeAbort) { try { __activeAbort.abort(); } catch(_e){} }
       __activeAbort = new AbortController();
       var signal = __activeAbort.signal;
 
       if (ENABLE_ALL_DEVICES_MODE && mode === 'ALL') {
         var allIds = getAllDeviceIdsFromState(stParams);
+        if (allIds && allIds.length) __lastKnownAllIds = allIds.slice();
+        if ((!allIds || !allIds.length) && __lastKnownAllIds.length) {
+          allIds = __lastKnownAllIds.slice();
+        }
         if (!allIds || !allIds.length) {
           setEmptyState();
           drawAll();
+          scheduleUpdate(240);
           return;
         }
 
@@ -1242,7 +1417,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       // lọc theo rng (SINGLE vẫn có thể dùng rng)
       // build histogram (giữ nguyên logic cũ)
       if (!GROUP_BY_DATASOURCE) {
-        var maleGlobal = [], femaleGlobal = [];
+        var maleGlobal = [], femaleGlobal = [], unknownGlobal = [];
         for (var gi = 0; gi < groups.length; gi++) {
           var g = groups[gi];
           for (var pi = 0; pi < g.payloads.length; pi++) {
@@ -1255,23 +1430,24 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
             var split = splitAgesByGender(payload);
             if (split.male && split.male.length)   maleGlobal   = maleGlobal.concat(split.male);
             if (split.female && split.female.length) femaleGlobal = femaleGlobal.concat(split.female);
+            if (split.unknown && split.unknown.length) unknownGlobal = unknownGlobal.concat(split.unknown);
           }
         }
 
         var series = [];
         if (SERIES === 'male' || SERIES === 'both')   series.push({ label: 'Male',   ages: maleGlobal });
         if (SERIES === 'female' || SERIES === 'both') series.push({ label: 'Female', ages: femaleGlobal });
+        if (SERIES === 'both' && unknownGlobal.length) series.push({ label: 'Unknown', ages: unknownGlobal });
 
         buildStackedHistogram(series);
         computeAutoZoom();
         startBarsAnimation();
-        _rAF(function(){ hideLoading(); });
         return;
       }
 
       var seriesOld = [];
       for (var gi2 = 0; gi2 < groups.length; gi2++) {
-        var g2 = groups[gi2], maleAll = [], femaleAll = [];
+        var g2 = groups[gi2], maleAll = [], femaleAll = [], unknownAll = [];
         for (var pi2 = 0; pi2 < g2.payloads.length; pi2++) {
           var rec2 = g2.payloads[pi2];
           var ts2 = Number(rec2 && rec2.ts);
@@ -1282,19 +1458,22 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
           var split2 = splitAgesByGender(payload2);
           maleAll = maleAll.concat(split2.male);
           femaleAll = femaleAll.concat(split2.female);
+          unknownAll = unknownAll.concat(split2.unknown || []);
         }
         if (SERIES === 'male' || SERIES === 'both')   seriesOld.push({ label: g2.label + ' / male',   ages: maleAll });
         if (SERIES === 'female' || SERIES === 'both') seriesOld.push({ label: g2.label + ' / female', ages: femaleAll });
+        if (SERIES === 'both' && unknownAll.length)   seriesOld.push({ label: g2.label + ' / unknown', ages: unknownAll });
       }
 
       buildStackedHistogram(seriesOld);
       computeAutoZoom();
       startBarsAnimation();
-      _rAF(function(){ hideLoading(); });
-    } finally {
-      if (mySeq === __updateSeq) {
-        _rAF(function(){ hideLoading(); });
+    } catch(_e) {
+      if (DEBUG) {
+        try { console.error('[histogram] runUpdate error', _e); } catch(_e2){}
       }
+    } finally {
+      stopLoading(mySeq);
     }
   }
 

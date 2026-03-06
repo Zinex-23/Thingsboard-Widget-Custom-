@@ -59,13 +59,9 @@ function initServices() {
   const inj = self.ctx.$scope?.$injector;
   if (!inj) return;
   self.attributeService = inj.get(self.ctx.servicesMap.get("attributeService"));
-  try {
-    const token = self.ctx.servicesMap.get("telemetryService") || self.ctx.servicesMap.get("telemetry");
-    self.telemetryService = token ? inj.get(token) : null;
-  } catch (e) { self.telemetryService = null; }
-  self.telemetryKey = (self.ctx.settings && self.ctx.settings.telemetryKey) || "cam_active";
   self.serverAttrKey = "current_cam";
   self.deviceLabelKey = "deviceLabel";
+  self.statisticConfigKey = (self.ctx.settings && self.ctx.settings.statisticConfigKey) || "statistic_config";
 }
 
 /* ---------- UI helpers ---------- */
@@ -85,6 +81,14 @@ function updateLabels() {
   if (self.camLabelEl) {
     self.camLabelEl.textContent = (self.camCard && self.camCard.classList.contains('cam-tablet')) ? 'Tablet Camera' : 'Edge Camera';
   }
+}
+
+function setCamCardMode(isTablet) {
+  if (!self.camCard) return;
+  // Keep camera card visible; tablet mode only changes visual state.
+  self.camCard.style.display = '';
+  self.camCard.classList.toggle('cam-tablet', !!isTablet);
+  self.camCard.classList.remove('cam-card-hidden');
 }
 
 function clearCamDropdown() {
@@ -560,9 +564,10 @@ function reloadCamForCurrentDevice(force) {
         (attrs || []).forEach(a => { if (a && a.key != null) map[a.key] = a.value; });
         const label = map[self.deviceLabelKey] != null ? String(map[self.deviceLabelKey]) : null;
         const currentCam = map[self.serverAttrKey] != null ? String(map[self.serverAttrKey]) : null;
-        const isTablet = (label === 'Tablet' || label === 'tablet' || label === 'tablet-type');
+        const normLabel = (label || '').trim().toLowerCase();
+        const isTablet = normLabel === 'tablet' || normLabel === 'tablet-type' || normLabel.indexOf('tablet') !== -1;
 
-        if (self.camCard) self.camCard.classList.toggle('cam-tablet', isTablet);
+        setCamCardMode(isTablet);
         if (self.camLabelEl) self.camLabelEl.textContent = isTablet ? 'Tablet Camera' : 'Edge Camera';
 
         if (isTablet) {
@@ -582,13 +587,13 @@ function reloadCamForCurrentDevice(force) {
           return;
         }
 
-        fetchLatestPassCam(entityId, curSeq, function (options) {
+        fetchCamOptionsFromStatisticConfig(entityId, curSeq, function (options) {
           if (curSeq !== seq) return;
           buildCamOptionsAndSelect(entityId, options, currentCam, label);
         });
       },
       function () {
-        fetchLatestPassCam(entityId, curSeq, function (options) {
+        fetchCamOptionsFromStatisticConfig(entityId, curSeq, function (options) {
           if (curSeq !== seq) return;
           buildCamOptionsAndSelect(entityId, options, null, null);
         });
@@ -612,7 +617,11 @@ function buildCamOptionsAndSelect(entityId, options, currentCam, deviceLabel) {
     return;
   }
 
-  if (self.camCard) self.camCard.classList.remove('cam-tablet');
+  if (self.camCard) {
+    self.camCard.style.display = '';
+    self.camCard.classList.remove('cam-tablet');
+    self.camCard.classList.remove('cam-card-hidden');
+  }
 
   opts.forEach(v => {
     const o = document.createElement('option');
@@ -640,52 +649,62 @@ function buildCamOptionsAndSelect(entityId, options, currentCam, deviceLabel) {
   }
 }
 
-function fetchLatestPassCam(entityId, curSeq, cb) {
-  if (self.telemetryService?.getLatestTimeseries) {
-    self.telemetryService.getLatestTimeseries(entityId, [self.telemetryKey]).subscribe(
-      function (data) {
-        if (curSeq !== seq) return;
-        const arr = data && data[self.telemetryKey];
-        const raw = (arr && arr.length) ? arr[0].value : null;
-        cb(parseCamOptions(raw));
-      },
-      function () { cb([]); }
-    );
-    return;
-  }
-  const key = encodeURIComponent(self.telemetryKey);
-  const url = `/api/plugins/telemetry/DEVICE/${entityId.id}/values/timeseries?keys=${key}&limit=1`;
-  self.ctx.http.get(url).subscribe(
-    function (res) {
-      if (curSeq !== seq) return;
-      const data = res?.data || res;
-      const arr = data && data[self.telemetryKey];
-      const raw = (arr && arr.length) ? arr[0].value : null;
-      cb(parseCamOptions(raw));
-    },
-    function () { cb([]); }
-  );
+function fetchCamOptionsFromStatisticConfig(entityId, curSeq, cb) {
+  readAttributeValue(entityId, "SHARED_SCOPE", self.statisticConfigKey, curSeq, function (sharedRaw) {
+    const sharedOpts = parseStatisticConfigCamOptions(sharedRaw);
+    if (sharedOpts.length) {
+      cb(sharedOpts);
+      return;
+    }
+    // Fallback for environments where statistic_config was saved in SERVER_SCOPE.
+    readAttributeValue(entityId, "SERVER_SCOPE", self.statisticConfigKey, curSeq, function (serverRaw) {
+      cb(parseStatisticConfigCamOptions(serverRaw));
+    });
+  });
 }
 
-function parseCamOptions(raw) {
+function readAttributeValue(entityId, scope, key, curSeq, cb) {
+  self.attributeService
+    .getEntityAttributes(entityId, scope, [key])
+    .subscribe(
+      function (attrs) {
+        if (curSeq !== seq) return;
+        let value = null;
+        (attrs || []).forEach(function (a) {
+          if (a && a.key === key) value = a.value;
+        });
+        cb(value);
+      },
+      function () {
+        if (curSeq !== seq) return;
+        cb(null);
+      }
+    );
+}
+
+function parseStatisticConfigCamOptions(raw) {
   if (raw == null) return [];
-  let obj;
+  let obj = raw;
   try { obj = (typeof raw === "string") ? JSON.parse(raw) : raw; }
   catch (e) { return []; }
-  if (!obj || typeof obj !== "object") return [];
+  if (!Array.isArray(obj)) return [];
+  const seen = {};
+  const out = [];
+  obj.forEach(function (item) {
+    let rawId = null;
+    if (item && typeof item === "object" && item.id != null) rawId = item.id;
+    else if (typeof item === "string" || typeof item === "number") rawId = item;
+    if (rawId == null) return;
 
-  // Support both old object shape and new array shape (e.g. [2,3,10]).
-  if (Array.isArray(obj)) {
-    return obj
-      .map(v => (v != null ? String(v) : ''))
-      .filter(Boolean)
-      .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
-      .map(k => `CAM_${k}`);
-  }
-
-  return Object.keys(obj)
-    .sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0))
-    .map(k => `CAM_${k}`);
+    let camId = String(rawId).trim();
+    if (!camId) return;
+    if (/^\d+$/.test(camId)) camId = "CAM_" + camId;
+    else if (/^cam_/i.test(camId)) camId = "CAM_" + camId.slice(4);
+    if (seen[camId]) return;
+    seen[camId] = true;
+    out.push(camId);
+  });
+  return out;
 }
 
 function saveServerCam(entityId, camName, shouldEmit) {
