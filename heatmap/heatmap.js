@@ -14,11 +14,12 @@
   var hourMode = '10h';                 // '10h' | '24h'
   var currentMode = 'custom';           // 'custom' local range (chips/modal)
 
-  var PAD_HM = { L: 98, T: 34, R: 20, B: 22 };
+  var PAD_HM = { L: 98, T: 34, R: 120, B: 22 };
   var LEVEL_COUNT = 5;
 
   var domainMax = 0;
   var BINS = [];
+  var mobileSelectedCellKey = null;
 
   // Guards (stale render / fetch)
   var __fetchSeq = 0;
@@ -40,6 +41,8 @@
 
   // DOM ids (must match widget HTML template)
   var ids = {
+    root: 'eh2-root', mobileNote: 'eh2-mobile-note',
+    mobileBoard: 'eh2-mobile-board', mobileDetail: 'eh2-mobile-detail',
     main: 'eh2-main', canvas: 'eh2-canvas',
     header: 'eh2-header', rangeGroup: 'eh2-range-group',
     hourGroup: 'eh2-hour-mode-group',
@@ -80,6 +83,41 @@
       if (self && self.ctx && self.ctx.$container && self.ctx.$container[0]) return self.ctx.$container[0];
     } catch (_) { }
     return document.body;
+  }
+  function getViewportWidth() {
+    try {
+      var w = window.top || window;
+      return w.innerWidth || window.innerWidth || 0;
+    } catch (_) {
+      return window.innerWidth || 0;
+    }
+  }
+  function isMobileLayout() {
+    var card = getCardEl();
+    var cardW = card ? card.clientWidth : 0;
+    var vw = getViewportWidth() || cardW;
+    return (vw > 0 && vw <= 767) || (cardW > 0 && cardW <= 720);
+  }
+  function syncResponsiveLayout() {
+    var root = getEl(ids.root);
+    if (root && root.classList) root.classList.toggle('eh-mobile', isMobileLayout());
+  }
+  function getLayoutConfig() {
+    var mobile = isMobileLayout();
+    return {
+      mobile: mobile,
+      padL: mobile ? 70 : PAD_HM.L,
+      padT: mobile ? 30 : PAD_HM.T,
+      padR: mobile ? 18 : PAD_HM.R,
+      padB: mobile ? 18 : PAD_HM.B,
+      cellMinWidth: mobile ? ((hourMode === '10h') ? 46 : 42) : 58,
+      minHeight: mobile ? 220 : 280,
+      minRowHeight: mobile ? 28 : 22,
+      xAxisStep: mobile ? ((hourMode === '10h') ? 3 : 4) : 2,
+      labelFont: mobile ? 11 : 12,
+      valueFont: mobile ? 10 : 11,
+      showColorScale: !mobile
+    };
   }
   function getWidgetId() {
     try {
@@ -375,6 +413,51 @@
       legend.appendChild(chip);
     });
   }
+
+  /*************** VERTICAL COLOR SCALE (on canvas) ***************/
+  function drawColorScale(ctx, canvasWidth, canvasHeight, PALETTE, layout) {
+    if (!BINS || BINS.length === 0) return;
+
+    layout = layout || getLayoutConfig();
+    var padL = layout.padL, padT = layout.padT, padR = layout.padR, padB = layout.padB;
+    var scaleWidth = 30;
+    var scaleX = canvasWidth - padR + 20; // Position in right padding area
+    var scaleHeight = canvasHeight - padT - padB;
+    var cellHeight = scaleHeight / BINS.length;
+
+    // Draw title
+    ctx.save();
+    ctx.fillStyle = '#475569';
+    ctx.font = 'bold ' + layout.labelFont + 'px Arial';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('Visitor Count', scaleX, padT - 20);
+
+    // Draw each color level (reversed: 0 at bottom, high at top)
+    BINS.slice().reverse().forEach(function (b, idx) {
+      var y = padT + idx * cellHeight;
+
+      // Draw colored rectangle
+      ctx.fillStyle = PALETTE[b.level];
+      ctx.fillRect(scaleX, y, scaleWidth, cellHeight - 2);
+
+      // Draw border
+      ctx.strokeStyle = '#e2e8f0';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(scaleX, y, scaleWidth, cellHeight - 2);
+
+      // Draw label
+      ctx.fillStyle = '#475569';
+      ctx.font = Math.max(10, layout.labelFont - 1) + 'px Arial';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      var label = (b.to < b.from) ? '—' : (b.from + ' – ' + b.to);
+      ctx.fillText(label, scaleX + scaleWidth + 6, y + cellHeight / 2);
+    });
+
+    ctx.restore();
+  }
+
 
   /*************** RANGE CHIPS / HOUR MODE ***************/
   function setActiveRangeChip(mode) {
@@ -705,8 +788,150 @@
 
   /*************** DRAW ***************/
   function formatInt(v) { return isFinite(v) ? String(Math.round(v)) : '—'; }
+  function cellKey(hour, dayIdx) { return String(hour) + '_' + String(dayIdx); }
+  function selectedKeyLabel() {
+    var found = dataKeyList.find(function (x) { return String(x.id) === String(selectedKeyId); });
+    return found ? found.label : 'People';
+  }
+  function getCellDetails(hour, dayIdx, cell) {
+    var date = new Date(startOfDay(startMs).getTime() + dayIdx * MS.day);
+    var h0 = String(hour).padStart(2, '0') + ':00';
+    var h1 = String((hour + 1) % 24).padStart(2, '0') + ':00';
+    return {
+      key: cellKey(hour, dayIdx),
+      hour: hour,
+      dayIdx: dayIdx,
+      hasData: !!(cell && cell.has),
+      value: (cell && cell.value) || 0,
+      valueText: formatInt((cell && cell.value) || 0),
+      dateFull: date.toLocaleDateString('en-GB', { weekday: 'long', day: '2-digit', month: 'short', year: 'numeric' }),
+      dateMain: date.toLocaleDateString('en-GB', { weekday: 'short' }),
+      dateSub: date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' }),
+      timeLabel: h0 + ' – ' + h1
+    };
+  }
+  function updateMobileDetail(details, emptyMessage) {
+    var detail = getEl(ids.mobileDetail);
+    if (!detail) return;
+
+    if (!details) {
+      detail.innerHTML =
+        '<div class="eh-mobile-detail-head">Selected Cell</div>' +
+        '<div class="eh-mobile-detail-title">' + (emptyMessage || 'Tap a cell to inspect details') + '</div>' +
+        '<div class="eh-mobile-detail-meta">All data remains available through horizontal and vertical scrolling.</div>';
+      return;
+    }
+
+    var valueClass = 'eh-mobile-detail-value' + (details.hasData ? '' : ' is-empty');
+    var valueText = details.hasData ? (details.valueText + ' ' + selectedKeyLabel()) : 'No data';
+    detail.innerHTML =
+      '<div class="eh-mobile-detail-head">Selected Cell</div>' +
+      '<div class="eh-mobile-detail-title">' + details.dateFull + '</div>' +
+      '<div class="eh-mobile-detail-meta">' + details.timeLabel + '</div>' +
+      '<div class="' + valueClass + '">' + valueText + '</div>';
+  }
+  function renderMobileHeatmap(map) {
+    var board = getEl(ids.mobileBoard);
+    if (!board) return;
+
+    if (!map) {
+      board.innerHTML = '<div class="eh-mobile-empty">No data</div>';
+      updateMobileDetail(null, 'No data available');
+      return;
+    }
+
+    var rows = Math.max(1, yDays);
+    var startHour = (hourMode === '10h') ? 7 : 0;
+    var endHour = (hourMode === '10h') ? 19 : 23;
+    var PALETTE = getPaletteForSelectedKey();
+    var selected = null;
+    if (mobileSelectedCellKey) {
+      var parts = mobileSelectedCellKey.split('_');
+      if (parts.length === 2) {
+        var sh = Number(parts[0]), sd = Number(parts[1]);
+        if (isFinite(sh) && isFinite(sd) && sh >= startHour && sh <= endHour && sd >= 0 && sd < rows) {
+          selected = { hour: sh, dayIdx: sd };
+        }
+      }
+    }
+
+    if (!selected) {
+      for (var dd0 = 0; dd0 < rows && !selected; dd0++) {
+        for (var hh0 = startHour; hh0 <= endHour; hh0++) {
+          var pickCell = map[cellKey(hh0, dd0)];
+          if (pickCell && pickCell.has) {
+            selected = { hour: hh0, dayIdx: dd0 };
+            break;
+          }
+        }
+      }
+    }
+    if (!selected) selected = { hour: startHour, dayIdx: 0 };
+    mobileSelectedCellKey = cellKey(selected.hour, selected.dayIdx);
+
+    var html = '<table class="eh-mobile-table"><thead><tr>';
+    html += '<th class="eh-mobile-corner">Date</th>';
+    for (var hour = startHour; hour <= endHour; hour++) {
+      html += '<th class="eh-mobile-hour">' + String(hour).padStart(2, '0') + '</th>';
+    }
+    html += '</tr></thead><tbody>';
+
+    for (var dayIdx = 0; dayIdx < rows; dayIdx++) {
+      var sampleCell = map[cellKey(startHour, dayIdx)];
+      var dateInfo = getCellDetails(startHour, dayIdx, sampleCell);
+      html += '<tr>';
+      html += '<th class="eh-mobile-date"><span class="eh-mobile-date-main">' + dateInfo.dateMain +
+        '</span><span class="eh-mobile-date-sub">' + dateInfo.dateSub + '</span></th>';
+
+      for (var hour2 = startHour; hour2 <= endHour; hour2++) {
+        var key = cellKey(hour2, dayIdx);
+        var cell = map[key];
+        var value = (cell && cell.value) || 0;
+        var lc = levelColor(value, !!(cell && cell.has), domainMax, PALETTE);
+        var fg = (cell && cell.has) ? ((lc.level >= 0 && lc.lum < 0.5) ? '#ffffff' : '#0f172a') : '#94a3b8';
+        var cls = 'eh-mobile-cell-btn' + ((cell && cell.has) ? '' : ' is-empty') + (mobileSelectedCellKey === key ? ' is-selected' : '');
+        var label = (cell && cell.has) ? formatInt(value) : '—';
+        html += '<td><button class="' + cls + '" data-hour="' + hour2 + '" data-day="' + dayIdx +
+          '" style="background:' + lc.css + ';color:' + fg + ';">' + label + '</button></td>';
+      }
+      html += '</tr>';
+    }
+    html += '</tbody></table>';
+    board.innerHTML = html;
+
+    if (!board.__wired) {
+      board.__wired = true;
+      board.addEventListener('click', function (ev) {
+        var btn = ev.target.closest('.eh-mobile-cell-btn');
+        if (!btn || !board.contains(btn)) return;
+        mobileSelectedCellKey = cellKey(Number(btn.getAttribute('data-hour')), Number(btn.getAttribute('data-day')));
+        renderMobileHeatmap(lastHeatmapMap);
+      });
+    }
+
+    var currentCell = map[mobileSelectedCellKey];
+    var selectedParts = mobileSelectedCellKey.split('_');
+    updateMobileDetail(getCellDetails(Number(selectedParts[0]), Number(selectedParts[1]), currentCell));
+  }
+  function renderHeatmapView(map) {
+    syncResponsiveLayout();
+    if (isMobileLayout()) {
+      renderMobileHeatmap(map);
+      return;
+    }
+    var board = getEl(ids.mobileBoard);
+    if (board) board.innerHTML = '';
+    drawHeatmap(map);
+  }
 
   function drawNoData(msg) {
+    syncResponsiveLayout();
+    if (isMobileLayout()) {
+      var board = getEl(ids.mobileBoard);
+      if (board) board.innerHTML = '<div class="eh-mobile-empty">' + (msg || 'No data') + '</div>';
+      updateMobileDetail(null, msg || 'No data');
+      return;
+    }
     var c = getEl(ids.canvas);
     if (!c) return;
     var ctx = c.getContext('2d');
@@ -745,7 +970,8 @@
     ctx.clearRect(0, 0, c.width, c.height);
 
     var rows = Math.max(1, yDays);
-    var padL = PAD_HM.L, padT = PAD_HM.T, padR = PAD_HM.R, padB = PAD_HM.B;
+    var layout = getLayoutConfig();
+    var padL = layout.padL, padT = layout.padT, padR = layout.padR, padB = layout.padB;
     var gridW = c.width - padL - padR, gridH = c.height - padT - padB;
 
     var startHour = (hourMode === '10h') ? 7 : 0;
@@ -757,22 +983,22 @@
 
     // X axis
     ctx.fillStyle = "#475569";
-    ctx.font = "12px Arial";
+    ctx.font = layout.labelFont + "px Arial";
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
-    for (var h = startHour; h <= endHour; h += 2) {
+    for (var h = startHour; h <= endHour; h += layout.xAxisStep) {
       ctx.fillText(String(h).padStart(2, '0') + ":00", padL + (h - startHour) * cw + cw / 2, padT - 10);
     }
 
     // Y axis labels
-    var MIN_LABEL_PX = 18;
+    var MIN_LABEL_PX = layout.mobile ? 24 : 18;
     var step = Math.max(1, Math.ceil(MIN_LABEL_PX / Math.max(1, ch)));
-    var compact = rows > 14 || ch < 14;
+    var compact = layout.mobile || rows > 14 || ch < 14;
 
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#475569";
-    ctx.font = "12px Arial";
+    ctx.font = layout.labelFont + "px Arial";
 
     for (var d = 0; d < rows; d++) {
       var isLast = (d === rows - 1);
@@ -816,15 +1042,18 @@
         ctx.fillStyle = lc.css;
         ctx.fillRect(x0 + 1, y0 + 1, cw - 2, ch - 2);
 
-        if (cell && cell.has && cw > 30 && ch > 22) {
+        if (cell && cell.has && cw > (layout.mobile ? 42 : 30) && ch > (layout.mobile ? 26 : 22)) {
           ctx.fillStyle = (lc.level >= 0 && lc.lum < 0.5) ? "#fff" : "#0f172a";
-          ctx.font = "11px Arial";
+          ctx.font = layout.valueFont + "px Arial";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(formatInt(v), x0 + cw / 2, y0 + ch / 2);
         }
       }
     }
+
+    // Draw vertical color scale on the right
+    if (layout.showColorScale) drawColorScale(ctx, c.width, c.height, PALETTE, layout);
   }
 
   /*************** SIZE & TOOLTIP ***************/
@@ -834,30 +1063,45 @@
 
     var card = getCardEl();
     var header = getEl(ids.header);
+    var legend = getEl(ids.legend);
+    var mobileNote = getEl(ids.mobileNote);
+    var mobileDetail = getEl(ids.mobileDetail);
+
+    syncResponsiveLayout();
+    var layout = getLayoutConfig();
 
     var cs = getComputedStyle(card);
     var padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     var headerH = header ? header.offsetHeight : 0;
+    var legendH = (layout.mobile && legend) ? legend.offsetHeight : 0;
+    var noteH = (layout.mobile && mobileNote) ? mobileNote.offsetHeight : 0;
+    var detailH = (layout.mobile && mobileDetail) ? mobileDetail.offsetHeight : 0;
 
     var cardH = card ? card.clientHeight : 400;
-    var availableH = cardH - (padV + headerH);
-    var targetH = Math.max(280, Math.floor(availableH));
+    var availableH = Math.max(180, Math.floor(cardH - (padV + headerH + legendH + noteH + detailH + 20)));
+    var rows = Math.max(1, yDays);
+    var desiredH = rows * layout.minRowHeight + layout.padT + layout.padB;
+    var targetH = layout.mobile
+      ? Math.max(layout.minHeight, desiredH)
+      : Math.max(layout.minHeight, availableH);
 
     var cardW = card ? card.clientWidth : 800;
     var totalCols = (hourMode === '10h') ? 13 : 24;
-    var cellMinWidth = 58;
-    var targetW = Math.max(cardW, totalCols * cellMinWidth + PAD_HM.L + PAD_HM.R);
+    var targetW = Math.max(cardW, totalCols * layout.cellMinWidth + layout.padL + layout.padR);
 
     var changed = false;
     if (canvas.width !== targetW) { canvas.width = targetW; changed = true; }
     if (canvas.height !== targetH) { canvas.height = targetH; changed = true; }
+    canvas.style.setProperty('--eh-canvas-width', targetW + 'px');
+    canvas.style.setProperty('--eh-canvas-height', targetH + 'px');
 
     var wrap = canvas.parentElement;
     if (wrap) {
       wrap.style.width = "100%";
       wrap.style.flex = "1 1 auto";
-      wrap.style.height = (targetH - 35) + "px";
+      wrap.style.height = availableH + "px";
       wrap.style.overflowX = "auto";
+      wrap.style.overflowY = layout.mobile ? "auto" : "hidden";
     }
     return changed;
   }
@@ -882,9 +1126,54 @@
       max-width:260px;
       white-space:nowrap;
     }
+    #${ids.tooltip}.eh-tooltip--mobile{
+      left:12px !important;
+      right:12px !important;
+      top:auto !important;
+      bottom:12px !important;
+      max-width:none;
+      white-space:normal;
+      transform:none;
+    }
     #${ids.tooltip} b{ color:#000000 !important; } /* ✅ chữ đen cho <b> */
   `;
     document.head.appendChild(st);
+  }
+
+  function getHeatmapPointInfo(canvas, clientX, clientY) {
+    if (!canvas || !lastHeatmapMap || !startMs || !endMs) return null;
+
+    var rect = canvas.getBoundingClientRect();
+    var mx = clientX - rect.left, my = clientY - rect.top;
+    var layout = getLayoutConfig();
+    var padL = layout.padL, padT = layout.padT, padR = layout.padR, padB = layout.padB;
+    var gridW = canvas.width - padL - padR, gridH = canvas.height - padT - padB;
+    var rows = Math.max(1, yDays);
+    var startHour = (hourMode === '10h') ? 7 : 0;
+    var endHour = (hourMode === '10h') ? 19 : 23;
+    var cols = endHour - startHour + 1;
+    var cw = gridW / cols, ch = gridH / rows;
+
+    if (mx < padL || mx > padL + gridW || my < padT || my > padT + gridH) return null;
+
+    var hh = startHour + Math.floor((mx - padL) / cw);
+    var dd = Math.floor((my - padT) / ch);
+    if (hh < startHour || hh > endHour || dd < 0 || dd >= rows) return null;
+
+    var key = hh + '_' + dd;
+    var cell = lastHeatmapMap[key];
+    if (!cell) return null;
+
+    var v = (cell && cell.value) || 0;
+    var date = new Date(startOfDay(startMs).getTime() + dd * MS.day);
+    var h0 = String(hh).padStart(2, '0') + ":00";
+    var h1 = String((hh + 1) % 24).padStart(2, '0') + ":00";
+    var ds = date.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' });
+    var html = !cell.has
+      ? `<b>${ds}</b><br>${h0} – ${h1}<br><b>No data</b>`
+      : `<b>${ds}</b><br>${h0} – ${h1}<br>People: <b>${formatInt(v)}</b>`;
+
+    return { key: key, html: html };
   }
 
 
@@ -892,65 +1181,73 @@
     injectTooltipStyleOnce();
 
     var canvas = getEl(ids.canvas), tooltip = getEl(ids.tooltip), card = getCardEl();
-    if (!canvas || !tooltip || !card) return;
+    if (!canvas || !tooltip || !card || canvas.__tooltipWired) return;
+    canvas.__tooltipWired = true;
 
     if (!tooltip.parentElement) {
       try { card.appendChild(tooltip); } catch (_) { }
     }
 
-    function hide() { tooltip.style.display = 'none'; canvas.style.cursor = 'default'; }
+    var activeTapKey = null;
+
+    function hide() {
+      activeTapKey = null;
+      tooltip.classList.remove('eh-tooltip--mobile');
+      tooltip.style.display = 'none';
+      canvas.style.cursor = 'default';
+    }
     function show(clientX, clientY, html) {
       tooltip.innerHTML = html;
+      tooltip.classList.remove('eh-tooltip--mobile');
       tooltip.style.display = 'block';
+      tooltip.style.right = 'auto';
+      tooltip.style.bottom = 'auto';
 
       var cardBox = card.getBoundingClientRect();
       var tt = tooltip.getBoundingClientRect();
       var x = clientX - cardBox.left, y = clientY - cardBox.top;
 
-      tooltip.style.left = Math.max(12, x - tt.width / 2) + 'px';
-      tooltip.style.top = Math.max(12, y - tt.height - 12) + 'px';
+      var left = clamp(x - tt.width / 2, 12, Math.max(12, card.clientWidth - tt.width - 12));
+      var top = y - tt.height - 12;
+      if (top < 12) top = Math.min(Math.max(12, card.clientHeight - tt.height - 12), y + 12);
+      tooltip.style.left = left + 'px';
+      tooltip.style.top = top + 'px';
+      canvas.style.cursor = 'pointer';
+    }
+    function showMobile(html, cellKey) {
+      activeTapKey = cellKey;
+      tooltip.innerHTML = html;
+      tooltip.classList.add('eh-tooltip--mobile');
+      tooltip.style.display = 'block';
     }
 
     canvas.addEventListener('mousemove', function (ev) {
-      if (!lastHeatmapMap || !startMs || !endMs) return hide();
-
-      var rect = canvas.getBoundingClientRect();
-      var mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-
-      var padL = PAD_HM.L, padT = PAD_HM.T, padR = PAD_HM.R, padB = PAD_HM.B;
-      var gridW = canvas.width - padL - padR, gridH = canvas.height - padT - padB;
-
-      var rows = Math.max(1, yDays);
-      var startHour = (hourMode === '10h') ? 7 : 0;
-      var endHour = (hourMode === '10h') ? 19 : 23;
-      var cols = endHour - startHour + 1;
-
-      var cw = gridW / cols, ch = gridH / rows;
-
-      if (mx < padL || mx > padL + gridW || my < padT || my > padT + gridH) return hide();
-
-      var hh = startHour + Math.floor((mx - padL) / cw);
-      var dd = Math.floor((my - padT) / ch);
-
-      var key = hh + '_' + dd;
-      var cell = lastHeatmapMap[key];
-      if (!cell) return hide();
-
-      var v = (cell && cell.value) || 0;
-      var date = new Date(startOfDay(startMs).getTime() + dd * MS.day);
-      var h0 = String(hh).padStart(2, '0') + ":00";
-      var h1 = String((hh + 1) % 24).padStart(2, '0') + ":00";
-
-      var ds = date.toLocaleDateString('en-GB', { weekday: 'short', year: 'numeric', month: 'short', day: '2-digit' });
-
-      if (!cell.has) {
-        show(ev.clientX, ev.clientY, `<b>${ds}</b><br>${h0} – ${h1}<br><b>No data</b>`);
-      } else {
-        show(ev.clientX, ev.clientY, `<b>${ds}</b><br>${h0} – ${h1}<br>People: <b>${formatInt(v)}</b>`);
-      }
+      if (isMobileLayout()) return;
+      var info = getHeatmapPointInfo(canvas, ev.clientX, ev.clientY);
+      if (!info) return hide();
+      show(ev.clientX, ev.clientY, info.html);
     });
 
-    canvas.addEventListener('mouseleave', function () { tooltip.style.display = 'none'; });
+    canvas.addEventListener('click', function (ev) {
+      var info = getHeatmapPointInfo(canvas, ev.clientX, ev.clientY);
+      if (!info) return hide();
+      if (!isMobileLayout()) return show(ev.clientX, ev.clientY, info.html);
+      if (tooltip.style.display === 'block' && activeTapKey === info.key) return hide();
+      showMobile(info.html, info.key);
+      ev.stopPropagation();
+    });
+
+    canvas.addEventListener('mouseleave', function () {
+      if (!isMobileLayout()) hide();
+    });
+
+    var wrap = canvas.parentElement;
+    if (wrap) wrap.addEventListener('scroll', hide, { passive: true });
+
+    self._eh2_docClick = function (ev) {
+      if (ev.target !== canvas) hide();
+    };
+    document.addEventListener('click', self._eh2_docClick, true);
   }
 
   /*************** LISTENING: signature & refresh ***************/
@@ -1053,7 +1350,7 @@
             domainMax = computeDomainMax(mapAll);
             renderLegend();
             updateCanvasSize();
-            drawHeatmap(mapAll);
+            renderHeatmapView(mapAll);
           })
           .finally(function () { __activeFetchController = null; });
         return;
@@ -1110,7 +1407,7 @@
       domainMax = computeDomainMax(map);
       renderLegend();
       updateCanvasSize();
-      drawHeatmap(map);
+      renderHeatmapView(map);
     });
   }
 
@@ -1137,6 +1434,7 @@
     heatmapCanvas = getEl(ids.canvas);
     heatmapCtx = heatmapCanvas ? heatmapCanvas.getContext('2d') : null;
 
+    syncResponsiveLayout();
     buildKeyDropdown();
     wireRangeButtons();
     wireHourModeButtons();
@@ -1164,21 +1462,31 @@
 
     try {
       resizeObs = new ResizeObserver(function () {
-        if (updateCanvasSize() && lastHeatmapMap) drawHeatmap(lastHeatmapMap);
+        syncResponsiveLayout();
+        updateCanvasSize();
+        if (lastHeatmapMap) renderHeatmapView(lastHeatmapMap);
       });
-      var main = getEl(ids.main);
-      if (main) resizeObs.observe(main);
+      var root = getEl(ids.root);
+      var card = getCardEl();
+      if (card) resizeObs.observe(card);
+      if (root && root !== card) resizeObs.observe(root);
     } catch (_) { }
 
     safeSetupTooltip();
   };
 
   self.onResize = function () {
-    if (updateCanvasSize() && lastHeatmapMap) drawHeatmap(lastHeatmapMap);
+    syncResponsiveLayout();
+    updateCanvasSize();
+    if (lastHeatmapMap) renderHeatmapView(lastHeatmapMap);
   };
 
   self.onDestroy = function () {
     try { resizeObs && resizeObs.disconnect(); } catch (_) { }
+    if (self._eh2_docClick) {
+      try { document.removeEventListener('click', self._eh2_docClick, true); } catch (_) { }
+      self._eh2_docClick = null;
+    }
     stopPollingSelection();
     if (__refreshTimer) {
       clearTimeout(__refreshTimer);

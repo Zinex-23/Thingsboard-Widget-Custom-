@@ -1,5 +1,8 @@
 self.onInit = function () {
     self.rootEl = (self.ctx && self.ctx.$container && self.ctx.$container[0]) ? self.ctx.$container[0] : document;
+    self.widgetEl = (self.rootEl && self.rootEl.matches && self.rootEl.matches('.store-selector-widget'))
+        ? self.rootEl
+        : self.rootEl.querySelector('.store-selector-widget');
     self.typeSelect = self.rootEl.querySelector('#typeSelect');
     self.deviceSelect = self.rootEl.querySelector('#deviceSelect');
     self.storeDisplay = self.rootEl.querySelector('#storeDisplay');
@@ -10,6 +13,7 @@ self.onInit = function () {
     self.isLoadingOptions = false;
     self.persistTimer = null;
     self.suppressAutoPersist = false;
+    self.compactBreakpoint = 560;
 
     self.updateLabels = function () {
         // Update Store Label
@@ -55,6 +59,7 @@ self.onInit = function () {
         });
     }
 
+    setupResponsiveLayout();
     init();
     wireCustomDropdowns();
 };
@@ -81,9 +86,56 @@ self.onDestroy = function () {
         clearTimeout(self.persistTimer);
         self.persistTimer = null;
     }
+    if (self.resizeObserver) {
+        self.resizeObserver.disconnect();
+        self.resizeObserver = null;
+    }
+    if (self.windowResizeHandler) {
+        window.removeEventListener('resize', self.windowResizeHandler);
+        self.windowResizeHandler = null;
+    }
     teardownCustomDropdowns();
     try { ensureStoreDropdownManager().close(); } catch (e) { }
 };
+
+function setupResponsiveLayout() {
+    applyResponsiveLayout();
+    if (typeof ResizeObserver === 'function') {
+        self.resizeObserver = new ResizeObserver(() => applyResponsiveLayout());
+        if (self.widgetEl) {
+            self.resizeObserver.observe(self.widgetEl);
+        }
+        if (self.rootEl && self.rootEl !== self.widgetEl && self.rootEl.nodeType === 1) {
+            self.resizeObserver.observe(self.rootEl);
+        }
+        return;
+    }
+
+    self.windowResizeHandler = function () {
+        applyResponsiveLayout();
+    };
+    window.addEventListener('resize', self.windowResizeHandler);
+}
+
+function applyResponsiveLayout() {
+    if (!self.widgetEl || !self.widgetEl.classList) return;
+
+    let width = 0;
+    if (self.widgetEl.getBoundingClientRect) {
+        width = self.widgetEl.getBoundingClientRect().width;
+    }
+    if ((!width || width < 1) && self.rootEl && self.rootEl.getBoundingClientRect) {
+        width = self.rootEl.getBoundingClientRect().width;
+    }
+
+    const shouldCompact = width > 0 && width <= self.compactBreakpoint;
+    const wasCompact = self.widgetEl.classList.contains('is-compact');
+
+    self.widgetEl.classList.toggle('is-compact', shouldCompact);
+    if (wasCompact !== shouldCompact) {
+        try { ensureStoreDropdownManager().close(); } catch (e) { }
+    }
+}
 
 async function init() {
     setStatus(' ');
@@ -269,7 +321,7 @@ async function loadDevicesByType(type, preferredDeviceId) {
                 { value: '__ALL__', label: `All devices` },
                 ...devices.map(d => ({ value: d.id, label: d.name }))
             ];
-            defaultSelection = '__ALL__';
+            defaultSelection = devices.length ? devices[0].id : '__ALL__';
         }
 
         // No placeholder - start directly with options
@@ -829,11 +881,11 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
                 // For timeseries widgets - multiple formats for compatibility
                 entities: entityList,
                 entityIds: entityList, // Array format for entity alias
-                entityId: null,
+                entityId: entityList.length > 0 ? { entityType: 'DEVICE', id: entityList[0].id } : null,
 
-                // Entity info should remain null in ALL mode to avoid forcing first-device binding
-                entityType: null,
-                id: null,
+                // Entity info (first entity as fallback, or empty)
+                entityType: 'DEVICE',
+                id: entityList.length > 0 ? entityList[0].id : null,
 
                 // Custom params (for static widgets - read via getStateParams())
                 selectedDeviceMode: 'ALL',
@@ -882,8 +934,6 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
                 entityType: 'DEVICE',
                 id: selectedDeviceId,
                 entityId: { entityType: 'DEVICE', id: selectedDeviceId }, // Nested format for entity alias
-                entities: null,
-                entityIds: null,
                 name: selectedDeviceName,
                 label: selectedDeviceName,
 
@@ -895,8 +945,7 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
 
                 // Mode shorthand
                 mode: 'SINGLE',
-                type: selectedType,
-                count: 1
+                type: selectedType
             };
 
             // //console.log('[store_type] 🔄 Updating current state with ALL params:', stateParams);
@@ -977,4 +1026,6 @@ async function persistSelectionAsync(selectedType, selectedDeviceId, selectedDev
 /** boilerplate */
 // self.onDestroy is already defined at the top
 self.onDataUpdated = function () { };
-self.onResize = function () { };
+self.onResize = function () {
+    applyResponsiveLayout();
+};
