@@ -11,6 +11,18 @@
   gap: 10px;
 }
 
+.utc-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  transform: scale(var(--content-scale, 1));
+  transform-origin: right top;
+}
+
 .utc-switcher {
   display: inline-flex;
   background: #f5f5f5;
@@ -154,4 +166,36 @@
     width: 112px !important;
     max-width: 112px !important;
   }
+}
+/* Hạ toàn bộ cụm xuống một chút */
+.utc-container{
+  padding-top: 10px !important;   /* tăng/giảm 6–16px tuỳ chỗ bị cắt */
+  overflow: visible !important;
+}
+
+/* Nếu chỉ muốn hạ riêng cụm tab */
+.utc-switcher{
+  margin-top: 8px !important;     /* tăng/giảm tuỳ ý */
+  /* hoặc dùng: position: relative; top: 8px; */
+}
+
+.utc-container.is-mobile {
+  align-items: center;
+  justify-content: center;
+  padding-top: 4px !important;
+  text-align: center;
+}
+
+.utc-container.is-mobile .utc-content {
+  align-items: center;
+  transform-origin: center center;
+}
+
+.utc-container.is-mobile .utc-switcher {
+  margin-top: 0 !important;
+  transform-origin: center center;
+}
+
+.utc-container.is-mobile .utc-offset-btn {
+  align-self: center;
 }

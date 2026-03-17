@@ -10,16 +10,18 @@
             var topDoc = topWin.document;
             var style = topDoc.getElementById('tb-utc-calendar-global-styles');
             var css =
-                '.tb-utc-calendar-overlay{position:fixed;inset:0;background:transparent;z-index:2147483647;--scale:' + scale + ';}' +
+                '.tb-utc-calendar-overlay{position:fixed;inset:0;background:transparent;z-index:2147483647;--scale:' + scale + ';padding:16px;box-sizing:border-box;overflow:auto;}' +
                 '.tb-utc-calendar{position:fixed;background:#fff;border-radius:calc(8px * var(--scale));' +
                 'box-shadow:0 calc(8px * var(--scale)) calc(24px * var(--scale)) rgba(0,0,0,.15);' +
-                'padding:calc(16px * var(--scale));min-width:calc(280px * var(--scale));' +
-                'z-index:2147483648;box-sizing:border-box;}' +
+                'padding:calc(16px * var(--scale));width:min(calc(320px * var(--scale)), calc(100vw - 32px));' +
+                'min-width:min(calc(280px * var(--scale)), calc(100vw - 32px));max-width:calc(100vw - 32px);' +
+                'max-height:calc(100vh - 32px);overflow:auto;z-index:2147483648;box-sizing:border-box;}' +
                 '.tb-utc-calendar-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:calc(16px * var(--scale));gap:calc(8px*var(--scale));}' +
                 '.tb-utc-nav-btn{width:calc(32px*var(--scale));height:calc(32px*var(--scale));border:none;background:transparent;border-radius:50%;' +
                 'cursor:pointer;font-size:calc(16px*var(--scale));color:#666;transition:background .2s;flex-shrink:0;}' +
                 '.tb-utc-nav-btn:hover{background:rgba(0,0,0,.05);}' +
                 '.tb-utc-calendar-title{font-size:calc(14px*var(--scale));font-weight:600;color:#333;text-align:center;flex:1;min-width:0;}' +
+                '.tb-utc-calendar-body{overflow:auto;}' +
                 '.tb-utc-weekdays{display:grid;grid-template-columns:repeat(7,1fr);gap:calc(4px*var(--scale));margin-bottom:calc(8px*var(--scale));}' +
                 '.tb-utc-weekday{text-align:center;font-size:calc(12px*var(--scale));font-weight:600;color:#999;padding:calc(8px*var(--scale)) 0;}' +
                 '.tb-utc-days{display:grid;grid-template-columns:repeat(7,1fr);gap:calc(4px*var(--scale));}' +
@@ -33,7 +35,9 @@
                 'cursor:pointer;font-size:calc(13px*var(--scale));font-weight:500;transition:all .2s;}' +
                 '.tb-utc-month:hover,.tb-utc-year:hover{background:rgba(48,86,128,.1);}' +
                 '.tb-utc-month.tb-utc-today,.tb-utc-year.tb-utc-today{background:#ED1C24;color:#fff;}' +
-                '.tb-utc-month.tb-utc-selected,.tb-utc-year.tb-utc-selected{outline:calc(2px*var(--scale)) solid #ED1C24;}';
+                '.tb-utc-month.tb-utc-selected,.tb-utc-year.tb-utc-selected{outline:calc(2px*var(--scale)) solid #ED1C24;}' +
+                '.tb-utc-calendar-overlay.tb-utc-calendar-overlay-mobile{display:flex;align-items:center;justify-content:center;}' +
+                '.tb-utc-calendar.tb-utc-calendar-mobile{position:relative !important;left:auto !important;top:auto !important;margin:auto;}';
             if (!style) {
                 style = topDoc.createElement('style');
                 style.id = 'tb-utc-calendar-global-styles';
@@ -43,15 +47,19 @@
                 style.textContent = css;
             }
         },
-        open: function (html, scale) {
+        open: function (html, scale, options) {
+            options = options || {};
             this.close();
             this.ensureStyles(scale);
             var topDoc = (window.top || window).document;
             var div = topDoc.createElement('div');
             div.className = 'tb-utc-calendar-overlay';
+            if (options.centered) div.className += ' tb-utc-calendar-overlay-mobile';
             div.innerHTML = html;
             topDoc.body.appendChild(div);
             this.overlay = div;
+            var calendarEl = div.querySelector('.tb-utc-calendar');
+            if (calendarEl && options.centered) calendarEl.className += ' tb-utc-calendar-mobile';
 
             var selfMgr = this;
             var onEsc = function (e) { if (e.key === 'Escape') selfMgr.close(); };
@@ -199,7 +207,9 @@ self.onInit = function () {
     var yearValue = document.getElementById('utc-year-value');
     var monthValue = document.getElementById('utc-month-value');
     var dayValue = document.getElementById('utc-day-value');
+    var utcContent = document.querySelector('.utc-content');
     var switcher = document.querySelector('.utc-switcher');
+    var utcContainer = document.querySelector('.utc-container');
 
     var HOUR_MS = 60 * 60 * 1000;
     var DAY_MS = 24 * 60 * 60 * 1000;
@@ -301,13 +311,74 @@ self.onInit = function () {
         (self.ctx && self.ctx.$scope && self.ctx.$scope.$element && self.ctx.$scope.$element[0]) ||
         document.body;
 
-    function widgetScale() {
+    function topWindowRef() {
+        return window.top || window;
+    }
+
+    function viewportWidth() {
+        return topWindowRef().innerWidth || window.innerWidth || 0;
+    }
+
+    function viewportHeight() {
+        return topWindowRef().innerHeight || window.innerHeight || 0;
+    }
+
+    function isMobileLayout() {
+        var vw = viewportWidth();
+        var coarsePointer = false;
+        try {
+            coarsePointer = !!(
+                (topWindowRef().matchMedia && topWindowRef().matchMedia('(pointer: coarse)').matches) ||
+                (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+            );
+        } catch (e) { }
+        return vw > 0 && (vw <= 767 || (coarsePointer && vw <= 1024));
+    }
+
+    function baseWidgetScale() {
         if (!widgetContainer || !switcher) return 1;
         var w = widgetContainer.offsetWidth || 200;
         var h = widgetContainer.offsetHeight || 60;
         return Math.max(0.5, Math.min(2, Math.min(w / 200, h / 60)));
     }
-    if (switcher && switcher.style) switcher.style.setProperty('--widget-scale', widgetScale());
+
+    function widgetScale() {
+        return isMobileLayout() ? 1 : baseWidgetScale();
+    }
+
+    function pickerScale() {
+        var vw = viewportWidth() || 360;
+        var vh = viewportHeight() || 640;
+        var fitted = Math.min(vw / 340, vh / 520);
+        return Math.max(0.82, Math.min(1, baseWidgetScale(), fitted));
+    }
+
+    function mobileContentScale() {
+        if (!utcContent) return 1;
+        var layoutBox = utcContainer || widgetContainer;
+        var availableW = ((layoutBox && layoutBox.clientWidth) || (widgetContainer && widgetContainer.clientWidth) || viewportWidth() || 240) - 8;
+        var availableH = ((layoutBox && layoutBox.clientHeight) || (widgetContainer && widgetContainer.clientHeight) || 0) - 8;
+        var naturalW = utcContent.scrollWidth || utcContent.offsetWidth || 1;
+        var naturalH = utcContent.scrollHeight || utcContent.offsetHeight || 1;
+        if (availableW < 1) availableW = naturalW;
+        if (availableH < 1) availableH = naturalH;
+        return Math.max(0.72, Math.min(2, Math.min(availableW / naturalW, availableH / naturalH)));
+    }
+
+    function syncMobileLayout() {
+        var mobile = isMobileLayout();
+        if (utcContainer && utcContainer.classList) {
+            utcContainer.classList.toggle('is-mobile', mobile);
+        }
+        if (switcher && switcher.style) {
+            switcher.style.setProperty('--widget-scale', mobile ? 1 : widgetScale());
+        }
+        if (utcContent && utcContent.style) {
+            utcContent.style.setProperty('--content-scale', mobile ? mobileContentScale() : 1);
+        }
+    }
+
+    syncMobileLayout();
 
     function setActiveVisual(mode) {
         [yearBtn, monthBtn, dayBtn].forEach(function (btn) {
@@ -369,50 +440,24 @@ self.onInit = function () {
         return { s: s, e: e, i: i };
     }
 
-    function getDashboardTimewindow() {
-        var d = self.ctx && self.ctx.dashboard ? self.ctx.dashboard : {};
-        var tw = d.dashboardTimewindow;
-        if (!tw && d.getDashboardTimewindow) tw = d.getDashboardTimewindow();
-        return tw || null;
-    }
-
-    function applyTimewindow(startMs, endMs, intervalMs, force) {
+    function applyTimewindow(startMs, endMs, intervalMs) {
         // tránh re-entrant
         if (_isApplyingTW) return;
         var cur = getCurrentTW();
         var target = { s: startMs, e: endMs, i: intervalMs };
-        if (!force && softEqualTW(cur, target)) return;
+        if (softEqualTW(cur, target)) return;
 
         _isApplyingTW = true;
 
-        var existing = getDashboardTimewindow() || {};
-        var aggType = existing && existing.aggregation && existing.aggregation.type ? existing.aggregation.type : 'SUM';
-        var aggLimit = existing && existing.aggregation && typeof existing.aggregation.limit === 'number'
-            ? existing.aggregation.limit
-            : 25000;
-        var aggInterval = (aggType === 'NONE')
-            ? ((existing.aggregation && typeof existing.aggregation.interval === 'number') ? existing.aggregation.interval : 0)
-            : intervalMs;
-        var histInterval = (aggType === 'NONE')
-            ? ((existing.history && typeof existing.history.interval === 'number') ? existing.history.interval : 0)
-            : intervalMs;
-        var historyType = existing && existing.history && typeof existing.history.historyType === 'number'
-            ? existing.history.historyType
-            : 1;
-
         var tw = {
-            hideInterval: existing.hideInterval === true,
-            hideQuickInterval: existing.hideQuickInterval === true,
-            hideAggregation: existing.hideAggregation === true,
-            hideAggInterval: existing.hideAggInterval === true,
-            hideTimezone: existing.hideTimezone === true,
+            hideInterval: false, hideQuickInterval: false, hideAggregation: false, hideAggInterval: false, hideTimezone: false,
             selectedTab: 1,
             realtime: { realtimeType: 0, interval: 1000, timewindowMs: 60000 },
             history: {
-                historyType: historyType, interval: histInterval, timewindowMs: endMs - startMs,
+                historyType: 1, interval: intervalMs, timewindowMs: endMs - startMs,
                 fixedTimewindow: { startTimeMs: startMs, endTimeMs: endMs }
             },
-            aggregation: { type: aggType, limit: aggLimit, interval: aggInterval }
+            aggregation: { type: 'SUM', limit: 25000, interval: intervalMs }
 
         };
         try {
@@ -474,7 +519,7 @@ self.onInit = function () {
             if (_userInteracted || _appliedInitialTW) { cancelInitialRetries(); return; }
             var cur = getCurrentTW();
             if (softEqualTW(cur, target)) { _appliedInitialTW = true; cancelInitialRetries(); return; }
-            applyTimewindow(target.s, target.e, target.i, true);
+            applyTimewindow(target.s, target.e, target.i);
             // đánh dấu đã apply 1 lần để không lặp
             _appliedInitialTW = true;
             cancelInitialRetries();
@@ -493,7 +538,8 @@ self.onInit = function () {
         activeButton = button; pickerMode = mode;
         setActiveVisual(mode);
 
-        var scale = widgetScale();
+        var scale = pickerScale();
+        var centered = isMobileLayout();
         var html =
             '<div class="tb-utc-calendar">' +
             '<div class="tb-utc-calendar-header">' +
@@ -504,7 +550,7 @@ self.onInit = function () {
             '<div class="tb-utc-calendar-body" id="tb-utc-body"></div>' +
             '</div>';
         var mgr = (window.top || window).__TB_UTC_CALENDAR__;
-        pickerElement = mgr.open(html, scale);
+        pickerElement = mgr.open(html, scale, { centered: centered });
 
         var topDoc = (window.top || window).document;
         var prevBtn = topDoc.getElementById('tb-utc-prev');
@@ -520,6 +566,16 @@ self.onInit = function () {
     function updatePickerPosition() {
         if (!pickerElement || !activeButton) return;
         var cal = pickerElement.querySelector('.tb-utc-calendar'); if (!cal) return;
+        var mgr = (window.top || window).__TB_UTC_CALENDAR__;
+        if (mgr && mgr.ensureStyles) mgr.ensureStyles(pickerScale());
+        var centered = isMobileLayout();
+        if (pickerElement.classList) pickerElement.classList.toggle('tb-utc-calendar-overlay-mobile', centered);
+        if (cal.classList) cal.classList.toggle('tb-utc-calendar-mobile', centered);
+        if (centered) {
+            cal.style.left = '';
+            cal.style.top = '';
+            return;
+        }
         var a = activeButton.getBoundingClientRect();
         var fe = window.frameElement;
         var f = fe ? fe.getBoundingClientRect() : { left: 0, top: 0 };
@@ -767,12 +823,18 @@ self.onInit = function () {
 
     if (widgetContainer && window.ResizeObserver) {
         var ro = new ResizeObserver(function () {
-            if (switcher && switcher.style) switcher.style.setProperty('--widget-scale', widgetScale());
+            syncMobileLayout();
             if (pickerElement) updatePickerPosition();
         });
         ro.observe(widgetContainer);
         self._utc_ro = ro;
     }
+    var onViewportResize = function () {
+        syncMobileLayout();
+        if (pickerElement) updatePickerPosition();
+    };
+    window.addEventListener('resize', onViewportResize);
+    self._utc_windowResize = onViewportResize;
     if (yearBtn) yearBtn.addEventListener('click', function () { showPicker(yearBtn, 'year'); });
     if (monthBtn) monthBtn.addEventListener('click', function () { showPicker(monthBtn, 'month'); });
     if (dayBtn) dayBtn.addEventListener('click', function () { showPicker(dayBtn, 'day'); });
@@ -790,6 +852,7 @@ self.onDestroy = function () {
         var mgr = (window.top || window).__TB_UTC_OFFSET__;
         if (mgr && mgr.close) mgr.close();
         if (self._utc_offsetResize) window.removeEventListener('resize', self._utc_offsetResize);
+        if (self._utc_windowResize) window.removeEventListener('resize', self._utc_windowResize);
         if (self._utc_cancelInit) self._utc_cancelInit();
         if (self._utc_ro && self._utc_ro.disconnect) self._utc_ro.disconnect();
         if (self._utc_closePicker) self._utc_closePicker();

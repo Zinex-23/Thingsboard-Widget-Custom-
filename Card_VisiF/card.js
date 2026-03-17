@@ -140,11 +140,15 @@
 
   function getSelectedMode(stateParams) {
     const m = stateParams.selectedDeviceMode || stateParams.mode;
-    return m === 'ALL' ? 'ALL' : 'SINGLE';
+    if (m === 'ALL') return 'ALL';
+    if (stateParams.selectedDeviceId === '__ALL__') return 'ALL';
+    if (getAllDeviceIdsFromState(stateParams).length > 1) return 'ALL';
+    return 'SINGLE';
   }
 
   function getSingleIdFromStateOrCtx(stateParams) {
     const direct = stateParams.selectedDeviceId || stateParams.id || (stateParams.entityId && stateParams.entityId.id);
+    if (direct === '__ALL__') return '';
     if (direct) return String(direct);
     const idsFromCtx = getDeviceIdsFromCtxDatasources();
     return idsFromCtx.length ? String(idsFromCtx[0]) : '';
@@ -625,10 +629,6 @@
       hideOverlay();
       return;
     }
-    // Use widget-calculated values (no custom aggregation)
-    hideOverlay();
-    renderCard();
-    return;
 
     if (!isAllMode) {
       if (!singleId || singleId === '__ALL__') {
