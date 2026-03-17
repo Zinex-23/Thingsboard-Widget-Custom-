@@ -1,0 +1,22 @@
+<div id="lc-root" class="lc-root">
+  <div class="lc-shell">
+    <div class="lc-topbar">
+      <button id="lc-reset-zoom" class="lc-btn" type="button">Reset Zoom</button>
+    </div>
+
+    <div class="lc-stage">
+      <canvas id="chart" aria-label="Line chart"></canvas>
+      <div id="lc-empty" class="lc-empty">No data in the selected time window</div>
+    </div>
+
+    <div id="lc-legend" class="lc-legend" aria-label="Line chart legend"></div>
+
+    <div id="lc-mobile-detail" class="lc-mobile-detail" aria-live="polite">
+      <div class="lc-mobile-detail-head">
+        <span class="lc-mobile-detail-label">Selected</span>
+        <span id="lc-selected-time" class="lc-mobile-detail-time">No selection</span>
+      </div>
+      <div id="lc-selected-values" class="lc-mobile-values"></div>
+    </div>
+  </div>
+</div>
