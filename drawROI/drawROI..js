@@ -43,6 +43,8 @@ self.onInit = function () {
 
     self._cams = [];
     self._activeCam = null; // only for edge
+    self._camsRefreshPromise = null;
+    self._lastCamsRefreshAt = 0;
 
     // ✅ NEW: ưu tiên cam hiển thị ban đầu (đọc từ SERVER_SCOPE.current_cam)
     self._preferredCamId = null;
@@ -101,7 +103,7 @@ self.onInit = function () {
             err_need_in_out: 'Please select at least one IN_OUT line.',
             err_invalid_stat_cfg: 'Invalid statistic_config format.',
             hint_tablet: 'Draw ROI with 4 points, then tap the red edge to toggle counting line.',
-            hint_edge: 'Select Detect/Region1/Region2, then tap points to draw ROI.',
+            hint_edge: 'Select Zone, then tap points to draw ROI.',
             legend_pass: 'Pass',
             legend_out: 'Exit'
         },
@@ -820,7 +822,7 @@ self.onInit = function () {
     /* =========================
      * ✅ NEW: read SERVER_SCOPE.current_cam
      * ========================= */
-    function normalizeCamIdFromCurrentCam(v) {
+    function normalizeCamId(v) {
         if (v == null) return null;
         const s = String(v).trim();
         if (!s) return null;
@@ -835,7 +837,7 @@ self.onInit = function () {
                 .subscribe(
                     (attrs) => {
                         const a = (attrs || []).find(x => x.key === 'current_cam');
-                        self._preferredCamId = normalizeCamIdFromCurrentCam(a?.value);
+                        self._preferredCamId = normalizeCamId(a?.value);
                         resolve(self._preferredCamId);
                     },
                     () => resolve(null)
@@ -843,50 +845,98 @@ self.onInit = function () {
         });
     }
 
-    /* ===== Telemetry pass_cam (edge only) ===== */
-    function readPassCamFromTelemetry() {
-        const dataArr = self.ctx.data || [];
-        const entry = dataArr.find(d => d?.dataKey?.name === 'pass_cam');
-        if (!entry || !entry.data || !entry.data.length) return null;
-        let v = entry.data[0][1];
-        if (v == null || v === '') return null;
-        if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return null; } }
-        return v;
+    /* ===== Edge camera list from statistic_config (SHARED_SCOPE) ===== */
+    function getCamIdsFromStatisticConfig(cfg) {
+        if (!Array.isArray(cfg)) return [];
+
+        const seen = Object.create(null);
+        const camIds = [];
+        for (let i = 0; i < cfg.length; i++) {
+            const camId = normalizeCamId(cfg[i]?.id);
+            if (!camId || seen[camId]) continue;
+            seen[camId] = true;
+            camIds.push(camId);
+        }
+
+        camIds.sort((a, b) => Number(a) - Number(b));
+        return camIds;
     }
 
-    function updateCamsFromTelemetry() {
-        const obj = readPassCamFromTelemetry();
-        if (!obj || typeof obj !== 'object') {
-            self._cams = [];
-            if (selectEl) selectEl.innerHTML = `<option value="">${t('noCamera')}</option>`;
-            return;
-        }
-        const camIds = Object.keys(obj).sort((a, b) => Number(a) - Number(b));
-        self._cams = camIds;
+    function renderCamOptions(camIds) {
+        self._cams = Array.isArray(camIds) ? camIds.slice() : [];
 
         if (!selectEl) return;
+
         selectEl.innerHTML = '';
-        camIds.forEach(id => {
+        if (!self._cams.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = t('noCamera');
+            selectEl.appendChild(opt);
+            self._activeCam = null;
+            return;
+        }
+
+        self._cams.forEach(id => {
             const opt = document.createElement('option');
             opt.value = id;
             opt.textContent = `${self._camPrefixText} ${id}`;
             selectEl.appendChild(opt);
         });
 
-        // ✅ CHANGED: ưu tiên activeCam -> preferredCamId(current_cam) -> cam đầu
         const next =
-            (self._activeCam && camIds.includes(self._activeCam)) ? self._activeCam :
-                (self._preferredCamId && camIds.includes(self._preferredCamId)) ? self._preferredCamId :
-                    camIds[0];
+            (self._activeCam && self._cams.includes(self._activeCam)) ? self._activeCam :
+                (self._preferredCamId && self._cams.includes(self._preferredCamId)) ? self._preferredCamId :
+                    self._cams[0];
 
-        selectEl.value = next;
-        if (next && next !== self._activeCam) setActiveCam(next);
+        selectEl.value = next || '';
+
+        if (!next) {
+            self._activeCam = null;
+            return;
+        }
+
+        if (next !== self._activeCam) setActiveCam(next);
     }
+
+    function updateCamsFromStatisticConfig(cfg) {
+        renderCamOptions(getCamIdsFromStatisticConfig(cfg));
+    }
+
+    function refreshCamsFromShared(force) {
+        if (self._mode !== 'edge') return Promise.resolve([]);
+
+        const now = Date.now();
+        if (!force && self._camsRefreshPromise) return self._camsRefreshPromise;
+        if (!force && self._lastCamsRefreshAt && (now - self._lastCamsRefreshAt) < 1500) {
+            return Promise.resolve(self._cams.slice());
+        }
+
+        self._camsRefreshPromise = readStatisticConfigShared()
+            .then(cfg => {
+                updateCamsFromStatisticConfig(cfg);
+                self._lastCamsRefreshAt = Date.now();
+                return self._cams.slice();
+            })
+            .catch(() => {
+                renderCamOptions([]);
+                self._lastCamsRefreshAt = Date.now();
+                return [];
+            })
+            .finally(() => {
+                self._camsRefreshPromise = null;
+            });
+
+        return self._camsRefreshPromise;
+    }
+
+    self._refreshCamsFromShared = refreshCamsFromShared;
 
     if (selectEl) {
         selectEl.addEventListener('change', () => {
             const camId = selectEl.value;
             if (camId) setActiveCam(camId);
+            else self._activeCam = null;
         });
     }
 
@@ -931,9 +981,9 @@ self.onInit = function () {
                 applyModeUI();
 
                 if (self._mode === 'edge') {
-                    // ✅ NEW: đọc current_cam trước rồi mới update dropdown
+                    // Read current_cam first, then populate camera dropdown from statistic_config.
                     loadCurrentCamServer().then(() => {
-                        updateCamsFromTelemetry();
+                        refreshCamsFromShared(true);
                     });
                 } else {
                     refreshLatestFrame();
@@ -1056,6 +1106,8 @@ self.onInit = function () {
     function loadShared() {
         return new Promise((resolve, reject) => {
             readStatisticConfigShared().then(cfg => {
+                if (self._mode === 'edge') updateCamsFromStatisticConfig(cfg);
+
                 if (!cfg) {
                     self._tabletPair = [];
                     self._lineTypes = [null, null, null, null];
@@ -1380,44 +1432,8 @@ self.onInit = function () {
 self.onDataUpdated = function () {
     try {
         if (self._mode !== 'edge') return;
-
-        const dataArr = self.ctx.data || [];
-        const entry = dataArr.find(d => d?.dataKey?.name === 'pass_cam');
-        if (!entry || !entry.data?.length) return;
-
-        let v = entry.data[0][1];
-        if (typeof v === 'string') { try { v = JSON.parse(v); } catch { return; } }
-        if (!v || typeof v !== 'object') return;
-
-        const camIds = Object.keys(v).sort((a, b) => Number(a) - Number(b));
-        const sel = self.ctx.$container.find('.cam-dd')[0];
-        if (!sel) return;
-
-        sel.innerHTML = '';
-        if (!camIds.length) {
-            sel.innerHTML = `<option value="">${(self._lang === 'ja') ? 'カメラなし' : 'No camera'}</option>`;
-            self._activeCam = null;
-            return;
-        }
-
-        camIds.forEach(id => {
-            const opt = document.createElement('option');
-            opt.value = id;
-            opt.textContent = `${self._camPrefixText || 'Cam'} ${id}`;
-            sel.appendChild(opt);
-        });
-
-        // ✅ CHANGED: ưu tiên activeCam -> preferredCamId(current_cam) -> cam đầu
-        const next =
-            (self._activeCam && camIds.includes(self._activeCam)) ? self._activeCam :
-                (self._preferredCamId && camIds.includes(self._preferredCamId)) ? self._preferredCamId :
-                    camIds[0];
-
-        sel.value = next;
-
-        if (next !== self._activeCam) {
-            self._activeCam = null;
-            sel.dispatchEvent(new Event('change'));
+        if (typeof self._refreshCamsFromShared === 'function') {
+            self._refreshCamsFromShared(false);
         }
     } catch (e) { }
 };

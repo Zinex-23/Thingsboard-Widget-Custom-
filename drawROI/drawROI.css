@@ -341,7 +341,7 @@ button.tb-btn.mat-button {
 }
 
 .roi-btn[data-roi="Detect"].active {
-    color: #ed1c24;
+    color: #d97706;
 }
 
 .roi-btn[data-roi="Region1"].active {
@@ -349,7 +349,7 @@ button.tb-btn.mat-button {
 }
 
 .roi-btn[data-roi="Region2"].active {
-    color: #d97706;
+    color: #ed1c24;
 }
 
 /* ===== Center Legend ===== */

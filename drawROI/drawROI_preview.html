@@ -442,10 +442,6 @@
                     edgeDevice: {
                         deviceLabel: 'edge-type',
                         current_cam: 'CAM_2',
-                        pass_cam: {
-                            '1': { name: 'Gate East' },
-                            '2': { name: 'Gate West' }
-                        },
                         frames: {
                             '1': createDemoFrame('edge cam 1', '#6d28d9', '#2563eb'),
                             '2': createDemoFrame('edge cam 2', '#dc2626', '#f59e0b')
@@ -985,8 +981,16 @@
             }
 
             function updateCamsFromSample() {
-                const passCam = samples.edgeDevice.pass_cam || {};
-                const camIds = Object.keys(passCam).sort((a, b) => Number(a) - Number(b));
+                const cfgArr = Array.isArray(samples.edgeDevice.statistic_config) ? samples.edgeDevice.statistic_config : [];
+                const seen = Object.create(null);
+                const camIds = [];
+                cfgArr.forEach((item) => {
+                    const camId = parseCurrentCam(item && item.id);
+                    if (!camId || seen[camId]) return;
+                    seen[camId] = true;
+                    camIds.push(camId);
+                });
+                camIds.sort((a, b) => Number(a) - Number(b));
                 state.cams = camIds;
 
                 selectEl.innerHTML = '';
