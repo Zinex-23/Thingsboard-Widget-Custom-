@@ -340,6 +340,22 @@ self.onInit = function () {
     /* ===== Utils ===== */
     function clamp01(n) { return Math.max(0, Math.min(1, n)); }
 
+    function isCoarsePointer() {
+        try {
+            return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function isSmallScreen() {
+        try {
+            return window.innerWidth <= 768;
+        } catch (e) {
+            return false;
+        }
+    }
+
     function computeImageDrawRect(stageW, stageH) {
         if (!self._bgReady) return self._imgDraw = { offX: 0, offY: 0, drawW: 0, drawH: 0 };
         const imgW = self._bgImg.naturalWidth || 1;
@@ -576,7 +592,8 @@ self.onInit = function () {
         const pts = self._tabletPair.map(normToCanvasPt);
         let bestIdx = null;
         let bestDist2 = Infinity;
-        const hit2 = 8 * 8;
+        const hitRadius = (isCoarsePointer() || isSmallScreen()) ? 18 : 8;
+        const hit2 = hitRadius * hitRadius;
         for (let i = 0; i < 4; i++) {
             const p1 = pts[i];
             const p2 = pts[(i + 1) % 4];
@@ -628,6 +645,10 @@ self.onInit = function () {
 
     /* ===== Cursor Management ===== */
     function updateCursor() {
+        if (isCoarsePointer()) {
+            if (canvasEl) canvasEl.style.cursor = 'default';
+            return;
+        }
         // Update cursor based on mode and polygon state
         if (self._mode === 'tablet' && self._tabletPair && self._tabletPair.length === 4) {
             // When 4 points are drawn, switch to pointer cursor for clicking edges
@@ -1366,6 +1387,7 @@ self.onInit = function () {
     }
 
     function onCanvasHover(ev) {
+        if (isCoarsePointer()) return;
         if (self._mode !== 'tablet' || !self._bgReady) return;
         const idx = getEdgeIndexAtPos(ev);
         if (idx !== self._hoverEdgeIdx) {
@@ -1391,6 +1413,7 @@ self.onInit = function () {
         canvasEl.addEventListener('click', onCanvasClick);
         canvasEl.addEventListener('mousemove', onCanvasHover);
         canvasEl.addEventListener('mouseleave', onCanvasLeave);
+        canvasEl.addEventListener('touchstart', onCanvasLeave, { passive: true });
     }
 
     /* ===== Toolbar actions ===== */

@@ -1,14 +1,14 @@
 <div class="wrapper">
     <div class="toolbar">
         <div class="toolbar-row">
-            <div class="toolbar-left">
+            <div class="toolbar-left toolbar-panel panel-actions">
                 <button class="tb-btn btn-save" data-tip="Save" mat-button color="primary" (click)="savePolygon()">Save</button>
                 <button class="tb-btn btn-undo" data-tip="Undo" mat-button (click)="undoPoint()">Undo</button>
                 <button class="tb-btn btn-clear" data-tip="Delete" mat-button (click)="clearAll()">Clear</button>
                 <button class="tb-btn btn-reload" data-tip="Reload" mat-button (click)="reloadSaved()">Reload</button>
             </div>
 
-            <div class="flow-legend" data-mode="tablet">
+            <div class="flow-legend toolbar-panel panel-legend" data-mode="tablet">
                 <span class="flow-item flow-pass">
                     <span class="flow-icon flow-icon-tablet">
                         <span class="flow-arrow"></span>
@@ -34,12 +34,12 @@
             </div>
 
             <div class="toolbar-right">
-                <div class="cam-box">
+                <div class="cam-box toolbar-panel panel-camera">
                     <label class="cam-label">Camera</label>
                     <select class="cam-dd"></select>
                 </div>
 
-                <div class="roi-switch">
+                <div class="roi-switch toolbar-panel panel-roi">
                     <button class="roi-btn active" data-roi="Detect">Detect</button>
                     <button class="roi-btn" data-roi="Region1">Region1</button>
                     <button class="roi-btn" data-roi="Region2">Region2</button>
