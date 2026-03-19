@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>UTC Timewindow Preview JP</title>
+  <link rel="stylesheet" href="utc.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+    }
+    .preview-frame {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .widget-shell {
+      width: 420px;
+      height: 130px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-frame">
+    <div class="widget-shell" id="utc-widget-root">
+      <div class="utc-container">
+        <div class="utc-switcher">
+          <button class="utc-tab-btn active" id="utc-day-btn">
+            <span id="utc-day-value"></span>
+          </button>
+          <button class="utc-tab-btn" id="utc-month-btn">
+            <span id="utc-month-value"></span>
+          </button>
+          <button class="utc-tab-btn" id="utc-year-btn">
+            <span id="utc-year-value"></span>
+          </button>
+        </div>
+        <button class="utc-offset-btn" id="utc-offset-btn">UTC</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.self = window;
+    self.ctx = {
+      $container: [document.getElementById('utc-widget-root')],
+      dashboard: {
+        dashboardTimewindow: null,
+        setDashboardTimewindow: function (tw) { this.dashboardTimewindow = tw; },
+        getDashboardTimewindow: function () { return this.dashboardTimewindow; },
+        dashboardTimewindowChangedSubject: { next: function () {} }
+      },
+      dashboardCtrl: { onUpdateTimewindow: function () {} }
+    };
+  </script>
+  <script src="utc.js"></script>
+  <script>
+    if (self.onInit) self.onInit();
+  </script>
+</body>
+</html>

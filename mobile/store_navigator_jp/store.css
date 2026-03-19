@@ -1,0 +1,144 @@
+/* ===== Container ===== */
+.store-selector-widget {
+    width: 100%;
+    height: 100%;
+    padding: 12px;
+    background: transparent;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    font-size: 14px;
+    color: #111827;
+}
+
+/* ===== Cards Container ===== */
+.cards-container {
+    display: flex;
+    gap: 16px;
+    width: 100%;
+    align-items: center;
+}
+
+/* ===== Card ===== */
+.custom-select-card {
+    position: relative;
+    background: #ffffff;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
+    padding: 12px 16px;
+    display: flex;
+    align-items: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: all 0.2s ease;
+    cursor: pointer;
+    min-width: 0;
+    --select-pad-left: 68px;
+    --select-pad-right: 44px;
+}
+
+.store-card { flex: 4; }
+.device-card { flex: 6; }
+
+.custom-select-card:hover {
+    border-color: #D1D5DB;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* ===== Icon Wrapper ===== */
+.card-icon-wrapper {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.store-icon-bg { background-color: #FEF2F2; }
+.device-icon-bg { background-color: #EFF6FF; }
+
+/* ===== Content ===== */
+.card-content {
+    display: flex;
+    flex-direction: column;
+    margin-left: 12px;
+    flex-grow: 1;
+    overflow: hidden;
+    margin-right: 8px;
+}
+.card-label {
+    font-size: 11px;
+    color: #6B7280;
+    margin-bottom: 2px;
+    text-transform: none;
+    font-weight: 500;
+}
+.card-value {
+    font-size: 15px;
+    font-weight: 700;
+    color: #111827;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+/* ===== Arrow ===== */
+.card-arrow {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.device-card .card-arrow path {
+    stroke: #3B82F6;
+}
+
+/* ===== Hidden Select (native) ===== */
+.hidden-select {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    z-index: 10;
+    pointer-events: none;
+    border-radius: 12px;
+    padding-left: var(--select-pad-left);
+    padding-right: var(--select-pad-right);
+}
+.hidden-select option {
+    color: #111827;
+    background: #fff;
+}
+
+/* ===== Status ===== */
+.status-container {
+    margin-top: 8px;
+    display: none;
+}
+.status-container:not(:empty) { display: block; }
+.status-text {
+    font-size: 0.8em;
+    color: #6B7280;
+    font-weight: 500;
+}
+
+/* ===== Responsive ===== */
+@media (max-width: 500px) {
+    .cards-container {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .store-card,
+    .device-card {
+        flex: auto;
+        width: 100%;
+    }
+}

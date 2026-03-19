@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Timewindow Preview</title>
+  <link rel="stylesheet" href="timewindow.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+    }
+    .preview-frame {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .widget-shell {
+      width: 360px;
+      height: 120px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-frame">
+    <div class="widget-shell" id="widget-root">
+      <div class="tw-container">
+        <div class="tw-switcher">
+          <button class="tw-tab-btn active" id="tw-day-btn">
+            <span id="tw-day-value"></span>
+          </button>
+          <button class="tw-tab-btn" id="tw-month-btn">
+            <span id="tw-month-value"></span>
+          </button>
+          <button class="tw-tab-btn" id="tw-year-btn">
+            <span id="tw-year-value"></span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.self = window;
+    self.ctx = {
+      $container: [document.getElementById('widget-root')],
+      dashboard: {
+        dashboardTimewindow: null,
+        setDashboardTimewindow: function (tw) { this.dashboardTimewindow = tw; },
+        getDashboardTimewindow: function () { return this.dashboardTimewindow; },
+        dashboardTimewindowChangedSubject: { next: function () {} }
+      },
+      dashboardCtrl: { onUpdateTimewindow: function () {} }
+    };
+  </script>
+  <script src="timewindow.js"></script>
+  <script>
+    if (self.onInit) self.onInit();
+  </script>
+</body>
+</html>

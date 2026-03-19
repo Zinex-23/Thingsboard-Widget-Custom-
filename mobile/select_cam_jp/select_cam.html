@@ -1,0 +1,84 @@
+<div class="store-selector-widget" id="storeCamWidgetRoot">
+  <div class="cards-container triple">
+    <!-- Store -->
+    <div class="custom-select-card store-card">
+      <div class="card-icon-wrapper store-icon-bg">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 21V8C6 7.44772 6.44772 7 7 7H17C17.5523 7 18 7.44772 18 8V21M3 21H21M9 11H11M13 11H15M9 15H11M13 15H15M9 19H11M13 19H15" stroke="#ED1C24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <div class="card-content">
+        <span class="card-label">店舗</span>
+        <span class="card-value" id="storeDisplay">店舗を選択</span>
+      </div>
+      <div class="card-arrow">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 7.5L10 12.5L15 7.5" stroke="#ED1C24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <select id="typeSelect" class="hidden-select">
+        <option value="">読み込み中…</option>
+      </select>
+    </div>
+
+    <!-- Device -->
+    <div class="custom-select-card device-card">
+      <div class="card-icon-wrapper device-icon-bg">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="5" y="2" width="14" height="20" rx="2" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <line x1="12" y1="18" x2="12.01" y2="18" stroke="#3B82F6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="card-content">
+        <span class="card-label">デバイス</span>
+        <span class="card-value" id="deviceDisplay">デバイスを選択</span>
+      </div>
+      <div class="card-arrow">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 7.5L10 12.5L15 7.5" stroke="#ED1C24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <select id="deviceSelect" class="hidden-select">
+        <option value="">先に店舗を選択</option>
+      </select>
+    </div>
+
+    <!-- Camera -->
+    <div class="custom-select-card cam-card" id="camCard">
+      <div class="card-icon-wrapper cam-icon-bg">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M4 7H16C17.1046 7 18 7.89543 18 9V15C18 16.1046 17.1046 17 16 17H4C2.89543 17 2 16.1046 2 15V9C2 7.89543 2.89543 7 4 7Z" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M18 10L22 8V16L18 14V10Z" stroke="#6366F1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="card-content">
+        <span class="card-label">カメラ</span>
+        <span class="card-value" id="camDisplay">カメラを選択</span>
+        <div class="cam-banner" id="camBanner">カメラは1台のみ</div>
+      </div>
+      <div class="card-arrow">
+        <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M5 7.5L10 12.5L15 7.5" stroke="#ED1C24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+      <select id="camSelect" class="hidden-select cam-hidden" disabled>
+        <option value="">先にデバイスを選択</option>
+      </select>
+    </div>
+
+    <!-- Edit ROI -->
+    <div class="custom-select-card action-card" id="camActionCard">
+      <div class="card-content action">
+        <span class="card-label">&nbsp;</span>
+        <button id="btnEditRoi" class="roi-btn" type="button" aria-label="ROI編集">
+          <span class="roi-icon" aria-hidden="true"></span>
+          <span class="roi-text">ROI編集</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status-container">
+    <span id="status" class="status-text"></span>
+  </div>
+</div>

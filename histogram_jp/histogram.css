@@ -51,6 +51,70 @@
 }
 #histCanvas{ width:100%; height:100%; display:block; }
 
+.tbw-mobile-detail{
+  display:none;
+  margin:0 12px 12px;
+  padding:12px 14px;
+  border:1px solid #dbe4f0;
+  border-radius:12px;
+  background:linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  box-shadow:0 10px 24px rgba(15, 23, 42, 0.06);
+}
+.tbw-mobile-detail-head{
+  font-size:11px;
+  font-weight:700;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  color:#64748b;
+}
+.tbw-mobile-detail-title{
+  margin-top:4px;
+  font-size:16px;
+  font-weight:700;
+  color:#0f172a;
+}
+.tbw-mobile-detail-meta{
+  margin-top:2px;
+  font-size:12px;
+  color:#64748b;
+}
+.tbw-mobile-detail-list{
+  margin-top:10px;
+  display:grid;
+  gap:8px;
+}
+.tbw-mobile-detail-row{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+}
+.tbw-mobile-detail-label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  color:#334155;
+  font-size:13px;
+}
+.tbw-mobile-detail-swatch{
+  width:10px;
+  height:10px;
+  border-radius:3px;
+  flex:0 0 auto;
+}
+.tbw-mobile-detail-value{
+  flex:0 0 auto;
+  font-size:13px;
+  font-weight:700;
+  color:#0f172a;
+}
+.tbw-mobile-detail-empty{
+  margin-top:8px;
+  font-size:12px;
+  color:#64748b;
+}
+
 /* ==== Calendar Overlay (giống scatter) ==== */
 :root{
   --hs-cell: clamp(32px, 9vw, 40px);
@@ -111,3 +175,34 @@
 .hscal-btn{ padding:8px 14px; font-size:12px; border:none; border-radius:8px; cursor:pointer; }
 .hscal-primary{ background:#22c55e; color:#fff; } .hscal-primary:hover{ background:#16a34a; }
 .hscal-secondary{ background:#6b7280; color:#fff; } .hscal-secondary:hover{ background:#4b5563; }
+
+@media (max-width: 768px) {
+  .tbw-root{
+    border-radius:0;
+  }
+
+  .tbw-legend{
+    grid-template-columns:1fr;
+    gap:10px;
+    padding-top:10px;
+  }
+
+  .tbw-legend > div{
+    width:100%;
+    min-width:0;
+    justify-content:flex-start;
+    padding:10px 12px;
+    border:1px solid #dbe4f0;
+    border-radius:10px;
+    background:#fff;
+  }
+
+  .tbw-chart{
+    min-height:260px;
+    padding:6px 8px 8px;
+  }
+
+  .tbw-mobile-detail{
+    display:block;
+  }
+}

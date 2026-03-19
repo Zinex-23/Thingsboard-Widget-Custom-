@@ -50,6 +50,21 @@
                   stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </button>
+
+            <div class="eh-btn-group" id="eh2-view-group">
+              <button class="eh-btn eh-btn--expand-icon" id="eh2-expand-toggle" type="button" aria-label="Expand fullscreen">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M8 3H3V8M16 3H21V8M21 16V21H16M3 16V21H8" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          <div id="eh2-expanded-toolbar" class="eh-expanded-toolbar" aria-hidden="true">
+            <button class="eh-expanded-close" id="eh2-expanded-close" type="button">Collapse</button>
+          </div>
+          <div id="eh2-expanded-scrollbar" class="eh-expanded-scrollbar" aria-hidden="true">
+            <input id="eh2-expanded-scroll-input" class="eh-expanded-scroll-input" type="range" min="0" max="0" value="0" step="1" />
           </div>
           <div id="eh2-key-wrap" class="eh-key-wrap" style="display:none;">
             <span class="eh-label">Customer:</span>

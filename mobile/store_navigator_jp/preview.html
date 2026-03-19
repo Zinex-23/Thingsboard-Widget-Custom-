@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ストアナビゲーター プレビュー</title>
+  <link rel="stylesheet" href="store.css" />
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f0f2f5;
+    }
+    .preview-frame {
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .widget-shell {
+      width: 520px;
+      height: 180px;
+      padding: 16px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+      box-sizing: border-box;
+    }
+  </style>
+</head>
+<body>
+  <div class="preview-frame">
+    <div class="widget-shell" id="store-widget-root">
+      <div class="store-selector-widget">
+        <div class="selector-row">
+          <div class="form-field store-field">
+            <label class="field-label">店舗</label>
+            <div class="select-wrapper">
+              <select id="typeSelect" class="mat-select">
+                <option value="">読み込み中…</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-field device-field">
+            <label class="field-label">デバイス</label>
+            <div class="select-wrapper">
+              <select id="deviceSelect" class="mat-select">
+                <option value="">先に店舗を選択してください</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="status-container">
+          <span id="status" class="status-text"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    window.self = window;
+    self.ctx = {
+      $container: [document.getElementById('store-widget-root')],
+      currentUser: { authority: 'TENANT_ADMIN' },
+      stateController: {
+        getStateParams: function () { return {}; },
+        updateState: function () {},
+        stateChanged: function () { return { subscribe: function () { return { unsubscribe: function () {} }; } }; }
+      }
+    };
+
+    window.fetch = async function (url) {
+      if (url.includes('/api/device/types')) {
+        return {
+          ok: true,
+          json: async function () { return ['店舗A', '店舗B']; }
+        };
+      }
+      if (url.includes('/api/tenant/deviceInfos')) {
+        return {
+          ok: true,
+          json: async function () {
+            return {
+              data: [
+                { id: { id: 'dev-1' }, name: 'デバイス1', type: '店舗A' },
+                { id: { id: 'dev-2' }, name: 'デバイス2', type: '店舗A' },
+                { id: { id: 'dev-3' }, name: 'デバイス3', type: '店舗B' }
+              ]
+            };
+          }
+        };
+      }
+      return { ok: false, status: 404, text: async function () { return 'Not found'; } };
+    };
+  </script>
+  <script src="store.js"></script>
+  <script>
+    if (self.onInit) self.onInit();
+  </script>
+</body>
+</html>

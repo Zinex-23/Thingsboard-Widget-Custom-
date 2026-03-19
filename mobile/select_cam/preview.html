@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Select Cam - Preview</title>
+  <link rel="stylesheet" href="select_cam.css">
+  <style>
+    body { margin: 0; padding: 24px; background: #f3f4f6; }
+    .preview-shell { max-width: 1100px; margin: 0 auto; background:#fff; padding:16px; border-radius:14px; box-shadow:0 6px 20px rgba(0,0,0,0.08);} 
+    h1 { font-family:'Inter',sans-serif; margin:0 0 12px 0; font-size:18px; color:#111827; }
+  </style>
+</head>
+<body>
+<div class="preview-shell">
+  <h1>Select Cam Preview</h1>
+  <div id="storeCamWidgetRoot"></div>
+</div>
+
+<script>
+// Inject the widget HTML
+fetch('select_cam.html')
+  .then(r => r.text())
+  .then(html => {
+    document.getElementById('storeCamWidgetRoot').outerHTML = html;
+    bootstrapPreview();
+  });
+
+function bootstrapPreview(){
+  const root = document.querySelector('.store-selector-widget');
+  const typeSelect = root.querySelector('#typeSelect');
+  const deviceSelect = root.querySelector('#deviceSelect');
+  const camSelect = root.querySelector('#camSelect');
+  const storeDisplay = root.querySelector('#storeDisplay');
+  const deviceDisplay = root.querySelector('#deviceDisplay');
+  const camDisplay = root.querySelector('#camDisplay');
+  const statusEl = root.querySelector('#status');
+
+  const data = {
+    stores: [
+      { id:'store-a', name:'Store A', devices:[
+        {id:'dev-a1', name:'Entrance Cam'},
+        {id:'dev-a2', name:'Cashier Tablet'}
+      ]},
+      { id:'store-b', name:'Store B', devices:[
+        {id:'dev-b1', name:'Main Hall'},
+        {id:'dev-b2', name:'Back Door'}
+      ]}
+    ],
+    cameras:{
+      'dev-a1':['CAM_1','CAM_2'],
+      'dev-a2':['CAM_1'],
+      'dev-b1':['CAM_1','CAM_2','CAM_3'],
+      'dev-b2':['CAM_1']
+    }
+  };
+
+  function fillSelect(sel, items, placeholder){
+    sel.innerHTML='';
+    if(placeholder){
+      const o=document.createElement('option');o.value='';o.textContent=placeholder;sel.appendChild(o);
+    }
+    items.forEach(it=>{
+      const o=document.createElement('option');
+      o.value=it.id; o.textContent=it.name; sel.appendChild(o);
+    });
+  }
+
+  function updateLabels(){
+    storeDisplay.textContent = typeSelect.selectedOptions[0]?.text || 'Select store';
+    deviceDisplay.textContent = deviceSelect.selectedOptions[0]?.text || 'Select device';
+    camDisplay.textContent = camSelect.selectedOptions[0]?.text || 'Select camera';
+  }
+
+  function wireCard(cardSel, sel){
+    const card=root.querySelector(cardSel);
+    if(!card||!sel) return;
+    card.addEventListener('click',e=>{e.stopPropagation(); sel.focus(); sel.click();});
+  }
+
+  function loadStores(){
+    fillSelect(typeSelect, data.stores, 'Choose store');
+    typeSelect.value = data.stores[0]?.id || '';
+    loadDevices();
+  }
+
+  function loadDevices(){
+    const storeId = typeSelect.value;
+    const store = data.stores.find(s=>s.id===storeId);
+    fillSelect(deviceSelect, store?store.devices:[], store?null:'Select store first');
+    deviceSelect.disabled = !store;
+    if(store && store.devices.length){
+      deviceSelect.value = store.devices[0].id;
+      loadCams();
+    } else {
+      camSelect.innerHTML='<option value="">Select device first</option>';
+      camSelect.disabled=true;
+    }
+  }
+
+  function loadCams(){
+    const devId = deviceSelect.value;
+    const cams = data.cameras[devId] || [];
+    camSelect.innerHTML='';
+    if(!cams.length){
+      camSelect.innerHTML='<option value="">No camera</option>';
+      camSelect.disabled=true;
+    } else {
+      cams.forEach(c=>{const o=document.createElement('option');o.value=c;o.textContent=c;camSelect.appendChild(o);});
+      camSelect.disabled=false;
+    }
+    updateLabels();
+  }
+
+  typeSelect.addEventListener('change',()=>{loadDevices(); updateLabels();});
+  deviceSelect.addEventListener('change',()=>{loadCams(); updateLabels();});
+  camSelect.addEventListener('change',updateLabels);
+
+  wireCard('.store-card', typeSelect);
+  wireCard('.device-card', deviceSelect);
+  wireCard('.cam-card', camSelect);
+
+  loadStores();
+  updateLabels();
+  if(statusEl) statusEl.textContent = 'Preview mode (mock data)';
+}
+</script>
+</body>
+</html>

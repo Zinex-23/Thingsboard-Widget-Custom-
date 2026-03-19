@@ -25,9 +25,17 @@ var ALL_KEYS = ['ages', 'gender'];        // keys cần fetch khi ALL
 var ALL_FETCH_LIMIT = 100000;             // limit timeseries
 var ALL_FETCH_AGG = 'NONE';               // agg
 var POLL_SELECTION_ENABLED = true;        // lắng nghe switch device selector phía trên
-var POLL_INTERVAL_MS = 350;               // polling signature
+var POLL_INTERVAL_MS = 800;               // polling signature
 var LOADING_TEXT = 'Loading...';          // overlay text
 var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp để tránh stale subscription
+var API_FETCH_TIMEOUT_MS = 18000;         // timeout mỗi request telemetry
+var ALL_FETCH_CONCURRENCY = 6;            // số request device chạy song song
+var LOADING_WATCHDOG_MS = 25000;          // auto-hide loading nếu request treo bất thường
+
+// ===== STABILITY =====
+var SKIP_SUBSCRIPTION_TRIGGERS_WHEN_API_FETCH = true; // bỏ trigger update từ subscription nếu đang dùng direct API
+var SAME_SIG_SKIP_WINDOW_MS = 800;                    // debounce theo signature
+var ALLOW_RERUN_WHEN_BUSY = true;                     // nếu đang chạy và có request mới, đánh dấu rerun 1 lần
 
 // ===========================================
 
@@ -47,7 +55,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     yMax: 1,
     hiddenSeries: {},
 
-    // Auto-zoom viewport (theo index trong labels gốc)
+    // Auto-zoom viewport
     zoom: { enabled: AUTO_ZOOM_ENABLED, startIdx: 0, endIdx: 0 },
 
     // Animation
@@ -57,20 +65,28 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   // --- Tooltip & hover state ---
   var _tooltipEl = null;
   var _layout = null; // lưu layout frame gần nhất để hit-test
-  var _hover = { ai: -1, si: -1 }; // ai: index tuổi, si: series index
+  var _hover = { ai: -1, si: -1 };
 
   // Guards
   var __fetchSeq = 0;
   var __pollTimer = null;
-  var __lastSig = null;
+  var __lastSelectionSig = null;
   var __lastAppliedSig = null;
   var __lastAppliedAt = 0;
-  var SAME_SIG_SKIP_WINDOW_MS = 600;
   var __updateSeq = 0;
   var __pendingUpdate = null;
   var __activeAbort = null;
+  var __loadingRunId = 0;
+  var __loadingWatchdog = null;
+  var __lastKnownAllIds = [];
 
-  // ---------- Utils (ES5) ----------
+  // Stability guards
+  var __isUpdating = false;
+  var __runningSig = null;
+  var __needsRerun = false;
+  var __rerunDelayMs = 80;
+
+  // ---------- Utils ----------
   function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
   function msToHuman(ms) {
     var sec = 1000, min = 60*sec, hour = 60*min, day = 24*hour;
@@ -91,8 +107,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return null;
   }
   function isFiniteNumber(x){ return typeof x === 'number' && isFinite(x); }
+  function nowMs(){ return Date.now(); }
 
-  // ---------- TB state helpers (ALL/SINGLE + switch detect) ----------
+  // ---------- TB state helpers ----------
   function safeGetToken() {
     try { return localStorage.getItem('jwt_token') || localStorage.getItem('token') || ''; } catch(_) { return ''; }
   }
@@ -119,20 +136,66 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return {};
   }
   function getAllDeviceIdsFromState(stateParams) {
-    var list = stateParams.entities || stateParams.entityIds || [];
     var ids = [];
-    if (Array.isArray(list)) {
-      list.forEach(function(e){ var id=extractDeviceId(e); if(id) ids.push(id); });
-    } else {
-      var id2=extractDeviceId(list); if(id2) ids.push(id2);
+    function pushFrom(value){
+      if (Array.isArray(value)) {
+        for (var i=0;i<value.length;i++){
+          var id = extractDeviceId(value[i]);
+          if (id) ids.push(id);
+        }
+        return;
+      }
+      var one = extractDeviceId(value);
+      if (one) ids.push(one);
     }
+
+    pushFrom(stateParams.entities);
+    pushFrom(stateParams.entityIds);
+    pushFrom(stateParams.selectedDeviceIds);
+
+    var csv = stateParams.selectedDeviceIdsCsv;
+    if (typeof csv === 'string' && csv.trim()) {
+      var arr = csv.split(',');
+      for (var c=0;c<arr.length;c++){
+        var token = String(arr[c] || '').trim();
+        if (token) ids.push(token);
+      }
+    }
+
+    if (!ids.length) {
+      try {
+        var sub = self.ctx && self.ctx.defaultSubscription;
+        var dss = sub && sub.datasources;
+        if (Array.isArray(dss)) {
+          for (var d=0; d<dss.length; d++){
+            var dId = extractDeviceId(dss[d] && (dss[d].entityId || dss[d].entity || dss[d]));
+            if (dId) ids.push(dId);
+          }
+        }
+      } catch(_){}
+    }
+
+    if (!ids.length) {
+      try {
+        var ds2 = self.ctx && (self.ctx.datasources || self.ctx.dataSources || self.ctx.dataSource);
+        if (Array.isArray(ds2)) {
+          for (var k=0; k<ds2.length; k++){
+            var e = ds2[k] && (ds2[k].entity || ds2[k].entityId || ds2[k].entityID || ds2[k]);
+            var id2 = extractDeviceId(e);
+            if (id2) ids.push(id2);
+          }
+        }
+      } catch(_){}
+    }
+
     return dedupe(ids);
   }
   function getSelectedMode(stateParams) {
-    // chỉnh nếu dashboard bạn dùng key khác
     var m = stateParams.selectedDeviceMode || stateParams.mode;
     if (m === 'ALL') return 'ALL';
     if (stateParams.selectedDeviceId === '__ALL__') return 'ALL';
+    if (Array.isArray(stateParams.selectedDeviceIds) && stateParams.selectedDeviceIds.length > 1) return 'ALL';
+    if (typeof stateParams.selectedDeviceIdsCsv === 'string' && stateParams.selectedDeviceIdsCsv.indexOf(',') >= 0) return 'ALL';
     var list = stateParams.entities || stateParams.entityIds || [];
     if (Array.isArray(list) && list.length > 1) return 'ALL';
     return 'SINGLE';
@@ -146,7 +209,6 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
         if (id) return id;
       }
     } catch(_){}
-    // fallback: defaultSubscription datasource
     try{
       var sub = self.ctx && self.ctx.defaultSubscription;
       var d0 = sub && sub.datasources && sub.datasources[0];
@@ -163,15 +225,33 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return '';
   }
 
-  function buildSignature() {
+  function buildSelectionSignature() {
     var st = readStateParams();
     var mode = getSelectedMode(st);
-    var singleId = getSingleDeviceIdFromStateOrCtx(st) || '';
-    var allIds = (mode === 'ALL') ? getAllDeviceIdsFromState(st).join(',') : '';
+    var singleId = (mode === 'ALL') ? '' : (getSingleDeviceIdFromStateOrCtx(st) || '');
+    var allIdsArr = (mode === 'ALL') ? getAllDeviceIdsFromState(st).slice() : [];
+    allIdsArr.sort();
+    var allIds = allIdsArr.join(',');
     return [
       'mode=' + mode,
       'single=' + singleId,
       'all=' + allIds,
+      'type=' + String(st.selectedDeviceType || st.type || '')
+    ].join('|');
+  }
+
+  function buildRenderSignature() {
+    var st = readStateParams();
+    var mode = getSelectedMode(st);
+    var singleId = (mode === 'ALL') ? '' : (getSingleDeviceIdFromStateOrCtx(st) || '');
+    var allIdsArr = (mode === 'ALL') ? getAllDeviceIdsFromState(st).slice() : [];
+    allIdsArr.sort();
+    var allIds = allIdsArr.join(',');
+    return [
+      'mode=' + mode,
+      'single=' + singleId,
+      'all=' + allIds,
+      'type=' + String(st.selectedDeviceType || st.type || ''),
       'series=' + String(SERIES),
       'gb=' + String(GROUP_BY_DATASOURCE),
       'az=' + String(AUTO_ZOOM_ENABLED),
@@ -182,13 +262,13 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
   function startPollingSelection(){
     if (!POLL_SELECTION_ENABLED) return;
     if (__pollTimer) return;
-    __lastSig = buildSignature();
+    __lastSelectionSig = buildSelectionSignature();
     __pollTimer = setInterval(function(){
       try{
-        var sig = buildSignature();
-        if (sig !== __lastSig){
-          __lastSig = sig;
-          scheduleUpdate(80); // trigger refresh
+        var sig = buildSelectionSignature();
+        if (sig !== __lastSelectionSig){
+          __lastSelectionSig = sig;
+          scheduleUpdate(100);
         }
       }catch(_){}
     }, POLL_INTERVAL_MS);
@@ -210,27 +290,27 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     if (!document.getElementById('tb-hist-loading-style')) {
       var st = document.createElement('style');
       st.id = 'tb-hist-loading-style';
-      st.textContent = `
-        .tb-hist__wrap-rel{ position:relative; }
-        .tb-hist__loading{
-          position:absolute; inset:0;
-          display:none;
-          align-items:center; justify-content:center;
-          background:rgba(255,255,255,0.72);
-          backdrop-filter: blur(2px);
-          z-index: 50;
-          font: 14px/1.2 Arial;
-          color:#334155;
-        }
-        .tb-hist__loading .spin{
-          width:18px;height:18px;border-radius:50%;
-          border:2px solid rgba(51,65,85,0.25);
-          border-top-color: rgba(51,65,85,0.85);
-          margin-right:10px;
-          animation: tbHistSpin 0.8s linear infinite;
-        }
-        @keyframes tbHistSpin{ to{ transform:rotate(360deg);} }
-      `;
+      st.textContent = [
+        '.tb-hist__wrap-rel{ position:relative; }',
+        '.tb-hist__loading{',
+        '  position:absolute; inset:0;',
+        '  display:none;',
+        '  align-items:center; justify-content:center;',
+        '  background:rgba(255,255,255,0.72);',
+        '  backdrop-filter: blur(2px);',
+        '  z-index: 50;',
+        '  font: 14px/1.2 Arial;',
+        '  color:#334155;',
+        '}',
+        '.tb-hist__loading .spin{',
+        '  width:18px;height:18px;border-radius:50%;',
+        '  border:2px solid rgba(51,65,85,0.25);',
+        '  border-top-color: rgba(51,65,85,0.85);',
+        '  margin-right:10px;',
+        '  animation: tbHistSpin 0.8s linear infinite;',
+        '}',
+        '@keyframes tbHistSpin{ to{ transform:rotate(360deg);} }'
+      ].join('');
       document.head.appendChild(st);
     }
 
@@ -240,7 +320,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     if (!el) {
       el = document.createElement('div');
       el.className = 'tb-hist__loading';
-      el.innerHTML = `<div class="spin"></div><div class="txt">${LOADING_TEXT||'Loading...'}</div>`;
+      el.innerHTML = '<div class="spin"></div><div class="txt">' + (LOADING_TEXT||'Loading...') + '</div>';
       root.appendChild(el);
     }
     return el;
@@ -253,8 +333,71 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     var el = ensureLoadingOverlay();
     if (el) el.style.display = 'none';
   }
+  function hideAllLoadingOverlays(){
+    try {
+      var list = document.querySelectorAll('.tb-hist__loading');
+      for (var i=0;i<list.length;i++) list[i].style.display = 'none';
+    } catch(_){}
+  }
+  function startLoading(runId){
+    __loadingRunId = runId;
+    showLoading();
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_){}
+      __loadingWatchdog = null;
+    }
+    __loadingWatchdog = setTimeout(function(){
+      if (runId !== __loadingRunId) return;
+      try { if (__activeAbort) __activeAbort.abort(); } catch(_){}
+      hideAllLoadingOverlays();
+    }, LOADING_WATCHDOG_MS);
+  }
+  function stopLoading(runId){
+    if (runId !== __loadingRunId) return;
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_){}
+      __loadingWatchdog = null;
+    }
+    hideAllLoadingOverlays();
+  }
 
-  // ---------- Session Storage Helpers (SAFE) ----------
+  function createTimedSignal(parentSignal, timeoutMs){
+    var ctrl = new AbortController();
+    var timeoutId = null;
+    var timedOut = false;
+    var parentHandler = null;
+
+    function abortSafe(){ try { ctrl.abort(); } catch(_){} }
+
+    if (parentSignal) {
+      if (parentSignal.aborted) abortSafe();
+      else {
+        parentHandler = function(){ abortSafe(); };
+        try { parentSignal.addEventListener('abort', parentHandler); } catch(_){}
+      }
+    }
+    if (isFiniteNumber(timeoutMs) && timeoutMs > 0) {
+      timeoutId = setTimeout(function(){
+        timedOut = true;
+        abortSafe();
+      }, timeoutMs);
+    }
+    return {
+      signal: ctrl.signal,
+      isTimedOut: function(){ return timedOut; },
+      cleanup: function(){
+        if (timeoutId) {
+          try { clearTimeout(timeoutId); } catch(_){}
+          timeoutId = null;
+        }
+        if (parentSignal && parentHandler) {
+          try { parentSignal.removeEventListener('abort', parentHandler); } catch(_){}
+        }
+      }
+    };
+  }
+
+  // ---------- Session Storage Helpers ----------
   var _ss = (function(){
     function getWidgetId(ctx){
       try {
@@ -315,7 +458,6 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     ui.titleText = getDashboardTitle(self.ctx);
     ui.timeWindowText = getTimeWindowText(self.ctx);
 
-    // ---- Load settings from Session Storage (if any) ----
     try {
       var savedSeries = _ss.get('SERIES', null);
       if (savedSeries === 'male' || savedSeries === 'female' || savedSeries === 'both') {
@@ -346,8 +488,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
 
     setEmptyState();
     drawAll();
-    setupResizeObserver(); // auto-fit, no scroll
+    setupResizeObserver();
     attachHoverEvents();
+
     if (self.ctx.stateController && self.ctx.stateController.stateChanged) {
       self.stateSubscription = self.ctx.stateController.stateChanged().subscribe(function () {
         try {
@@ -359,9 +502,8 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
         scheduleUpdate(120);
       });
     }
-    startPollingSelection();
 
-    // initial load
+    startPollingSelection();
     scheduleUpdate(50);
   };
 
@@ -374,7 +516,11 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
     } catch(_e){}
     refreshHeader();
-    scheduleUpdate(120);
+
+    if (SKIP_SUBSCRIPTION_TRIGGERS_WHEN_API_FETCH && (SINGLE_FETCH_USES_API || ENABLE_ALL_DEVICES_MODE)) {
+      return;
+    }
+    scheduleUpdate(200);
   };
 
   self.onLatestDataUpdated = function () {
@@ -384,7 +530,11 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
     } catch(_e){}
     refreshHeader();
-    scheduleUpdate(120);
+
+    if (SKIP_SUBSCRIPTION_TRIGGERS_WHEN_API_FETCH && (SINGLE_FETCH_USES_API || ENABLE_ALL_DEVICES_MODE)) {
+      return;
+    }
+    scheduleUpdate(200);
   };
 
   self.typeParameters = function () {
@@ -417,6 +567,11 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       try { __activeAbort.abort(); } catch(_e){}
       __activeAbort = null;
     }
+    if (__loadingWatchdog) {
+      try { clearTimeout(__loadingWatchdog); } catch(_e){}
+      __loadingWatchdog = null;
+    }
+    hideAllLoadingOverlays();
   };
 
   // ---------- Header ----------
@@ -436,7 +591,6 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return '';
   }
 
-  // ---- Time window hiệu lực ----
   function getEffectiveTimewindow(ctx){
     try {
       var sub = ctx && ctx.defaultSubscription;
@@ -476,7 +630,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return '';
   }
 
-  // ---------- Thu thập TB values (SINGLE) ----------
+  // ---------- Collect SINGLE fallback ----------
   function collectGroupedTBValues(ctx) {
     var result = [];
     function upsert(id, label, ts, val, meta) {
@@ -514,7 +668,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return result;
   }
 
-  // ---------- Ghép ages + gender THEO TIMESTAMP ----------
+  // ---------- Fuse ages + gender ----------
   function fuseAgesAndGenderByTimestamp(groups){
     var out = [];
     var used = {};
@@ -576,15 +730,13 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return '';
   }
 
-  // {male:[], female:[]}
   function splitAgesByGender(payload) {
     if (payload && typeof payload === 'object' && 'v' in payload) payload = payload.v;
     if (payload && typeof payload === 'object' && 'value' in payload && Object.keys(payload).length === 1) payload = payload.value;
     if (typeof payload === 'string') { try { payload = JSON.parse(payload); } catch(_e){} }
 
-    var out = { male: [], female: [] };
+    var out = { male: [], female: [], unknown: [] };
 
-    // kiểu cũ male_ages / female_ages
     if (payload && typeof payload === 'object') {
       var m1 = payload.male_ages != null ? payload.male_ages : (payload.values && payload.values.male_ages);
       var f1 = payload.female_ages != null ? payload.female_ages : (payload.values && payload.values.female_ages);
@@ -595,7 +747,6 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
     }
 
-    // ages + gender
     var ages = null, genders = null;
     if (payload && typeof payload === 'object') {
       if (Array.isArray(payload.ages) || typeof payload.ages === 'string') ages = Array.isArray(payload.ages) ? payload.ages : safeParseArray(payload.ages);
@@ -607,22 +758,31 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
     }
 
-    if (Array.isArray(ages) && Array.isArray(genders) && ages.length === genders.length) {
+    if (Array.isArray(ages) && Array.isArray(genders) && genders.length) {
       for (var i=0;i<ages.length;i++) {
         var n = Number(ages[i]);
-        var g = normalizeGenderStr(String(genders[i]));
+        var g = normalizeGenderStr(String(genders[i] == null ? '' : genders[i]));
         if (!isNaN(n) && n>=AGE_MIN && n<=AGE_MAX) {
           if (g==='male') out.male.push(n);
           else if (g==='female') out.female.push(n);
+          else out.unknown.push(n);
         }
       }
       return out;
     }
 
-    // fallback: chỉ có 1 mảng tuổi
+    if (Array.isArray(ages) && ages.length) {
+      var agesOnlyFromAgesField = parseAges(ages);
+      if (SERIES === 'male') out.male = out.male.concat(agesOnlyFromAgesField);
+      else if (SERIES === 'female') out.female = out.female.concat(agesOnlyFromAgesField);
+      else out.unknown = out.unknown.concat(agesOnlyFromAgesField);
+      return out;
+    }
+
     var agesOnly = parseAges(payload);
     if (SERIES === 'male') out.male = out.male.concat(agesOnly);
     else if (SERIES === 'female') out.female = out.female.concat(agesOnly);
+    else out.unknown = out.unknown.concat(agesOnly);
     return out;
 
     function safeParseArray(x){
@@ -647,6 +807,14 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       var parts = s.split(','), out2 = [];
       for (var j=0;j<parts.length;j++){ if(!parts[j]) continue; var nn=Number(parts[j]); if(!isNaN(nn)) out2.push(clamp(nn, AGE_MIN, AGE_MAX)); }
       return out2;
+    }
+    if (val && typeof val === 'object') {
+      if (Array.isArray(val.ages) || typeof val.ages === 'string') {
+        return parseAges(val.ages);
+      }
+      if (val.values && (Array.isArray(val.values.ages) || typeof val.values.ages === 'string')) {
+        return parseAges(val.values.ages);
+      }
     }
     if (val && typeof val === 'object' && (val.values || val.male_ages || val.female_ages)) {
       var ms = parseAges(val.male_ages || (val.values && val.values.male_ages) || []);
@@ -677,11 +845,16 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     var yMax = 1;
     for (var ai2=0;ai2<A;ai2++){
       var sum=0;
-      for (var si2=0;si2<Slen;si2++) sum+=counts2D[si2][ai2];
+      for (var si2=0;si2<Slen;si2++) {
+        if (state.hiddenSeries && state.hiddenSeries[si2]) continue;
+        sum+=counts2D[si2][ai2];
+      }
       if (sum>yMax) yMax=sum;
     }
 
-    var colors = ['#59B5FF','#FF96D0'];
+    var palette = ['#59B5FF','#FF96D0','#94A3B8','#22C55E','#F59E0B','#A78BFA'];
+    var colors = [];
+    for (var ci=0; ci<Slen; ci++) colors.push(palette[ci % palette.length]);
 
     state.labels = labels;
     state.seriesLabels = seriesLabels;
@@ -692,7 +865,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     writeLegend();
   }
 
-  // ---------- Auto-zoom computations ----------
+  // ---------- Auto-zoom ----------
   function computeAutoZoom(){
     var labels = state.labels;
     var A = labels.length;
@@ -709,7 +882,10 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     var minIdx = -1, maxIdx = -1;
     for (var ai=0; ai<A; ai++){
       var sum = 0;
-      for (var si=0; si<Slen; si++){ sum += (state.counts2D[si][ai]||0); }
+      for (var si=0; si<Slen; si++){
+        if (state.hiddenSeries && state.hiddenSeries[si]) continue;
+        sum += (state.counts2D[si][ai]||0);
+      }
       if (sum > 0){
         if (minIdx === -1) minIdx = ai;
         maxIdx = ai;
@@ -752,7 +928,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return 20;
   }
 
-  // ---------- Drawing (auto-fit, no scrollbar) ----------
+  // ---------- Drawing ----------
   function getCanvasContainer() {
     var el = document.getElementById('tb-hist-chartwrap');
     if (el) return el;
@@ -799,28 +975,34 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     legendEl.innerHTML = '';
     for (var i=0;i<state.seriesLabels.length;i++){
       var item=document.createElement('div');
-      item.style.display='flex'; item.style.alignItems='center'; item.style.gap='8px'; item.style.marginRight='6px';
-      item.style.cursor = 'pointer';
+      item.style.display='flex';
+      item.style.alignItems='center';
+      item.style.gap='8px';
+      item.style.marginRight='6px';
+      item.style.cursor='pointer';
       item.setAttribute('data-series-index', String(i));
 
       var sw=document.createElement('span');
-      sw.style.display='inline-block'; sw.style.width='12px'; sw.style.height='12px';
-      sw.style.borderRadius='3px'; sw.style.background=state.colors[i%state.colors.length];
+      sw.style.display='inline-block';
+      sw.style.width='12px';
+      sw.style.height='12px';
+      sw.style.borderRadius='3px';
+      sw.style.background=state.colors[i%state.colors.length];
       item.appendChild(sw);
 
       var txt=document.createElement('span');
-      txt.style.fontSize='12px'; txt.style.color='#444';
+      txt.style.fontSize='12px';
+      txt.style.color='#444';
       txt.appendChild(document.createTextNode(state.seriesLabels[i]+' — Total: '+(state.totals[i]||0)));
       item.appendChild(txt);
 
-      if (state.hiddenSeries && state.hiddenSeries[i]) {
-        item.style.opacity = '0.45';
-      }
+      if (state.hiddenSeries && state.hiddenSeries[i]) item.style.opacity = '0.45';
 
       item.addEventListener('click', function(){
         var idx = parseInt(this.getAttribute('data-series-index'), 10);
         if (!state.hiddenSeries) state.hiddenSeries = {};
         state.hiddenSeries[idx] = !state.hiddenSeries[idx];
+        computeAutoZoom();
         drawAll();
         writeLegend();
       });
@@ -829,7 +1011,8 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     }
     if (!state.seriesLabels.length){
       var empty=document.createElement('div');
-      empty.style.fontSize='12px'; empty.style.color='#888';
+      empty.style.fontSize='12px';
+      empty.style.color='#888';
       empty.appendChild(document.createTextNode('No data'));
       legendEl.appendChild(empty);
     }
@@ -887,23 +1070,22 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       if (sumY > yMax) yMax = sumY;
     }
     yMax = Math.max(yMax, 1);
+
     function yScale(v){ return plotH * (v / yMax); }
 
-    // Axes + grid
     ctx.strokeStyle = '#cbd5e1';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(margin.left, margin.top); ctx.lineTo(margin.left, margin.top + plotH); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(margin.left, margin.top + plotH); ctx.lineTo(margin.left + plotW, margin.top + plotH); ctx.stroke();
 
     var yTicks = 4;
-    for (var t = 1; t <= yTicks; t++) {
-      var v = (yMax / yTicks) * t;
-      var y = margin.top + plotH - yScale(v);
+    for (var t1 = 1; t1 <= yTicks; t1++) {
+      var v1 = (yMax / yTicks) * t1;
+      var y1 = margin.top + plotH - yScale(v1);
       ctx.strokeStyle = 'rgba(148,163,184,0.35)';
-      ctx.beginPath(); ctx.moveTo(margin.left, y); ctx.lineTo(margin.left + plotW, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(margin.left, y1); ctx.lineTo(margin.left + plotW, y1); ctx.stroke();
     }
 
-    // Y labels
     ctx.fillStyle = '#64748b';
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Arial, sans-serif';
     ctx.textAlign = 'right';
@@ -911,9 +1093,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     ctx.fillText('0', margin.left - 8, margin.top + plotH);
     ctx.fillText(String(yMax), margin.left - 8, margin.top + (plotH - yScale(yMax)));
 
-    // X ticks (nice step)
     var step = chooseNiceTickStep(visibleBins);
-    ctx.textAlign='center'; ctx.textBaseline='top';
+    ctx.textAlign='center';
+    ctx.textBaseline='top';
     for (var ai=zStart; ai<=zEnd; ai++){
       var ageVal = labels[ai];
       if ((ageVal - labels[zStart]) % step !== 0) continue;
@@ -926,7 +1108,6 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       ctx.fillText(String(ageVal), x, margin.top + plotH + 6);
     }
 
-    // Axis titles
     ctx.save();
     ctx.font = '12px system-ui, -apple-system, Segoe UI, Arial, sans-serif';
     ctx.fillStyle = '#475569';
@@ -955,7 +1136,8 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       zStart: zStart,
       zEnd: zEnd,
       barW: barW,
-      animProg: animProg
+      animProg: animProg,
+      visibleYMax: yMax
     };
 
     if (_hover && _hover.ai >= zStart && _hover.ai <= zEnd) {
@@ -980,6 +1162,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       }
       lastNonZero[ai0] = lastIdx;
     }
+
     for (var ai2 = zStart; ai2 <= zEnd; ai2++) {
       var baseline = 0;
       for (var si = 0; si < Slen; si++) {
@@ -1019,7 +1202,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     ctx.fill();
   }
 
-  // ---------- RANGE từ TIME WINDOW ----------
+  // ---------- Time window ----------
   function currentRangeFromTB(ctx, groups){
     var stw = getEffectiveTimewindow(ctx);
     if (!stw) return { start: -Infinity, end: Infinity };
@@ -1061,7 +1244,9 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
         var endMaybe = pickFirstNumber(endFixed, endGeneric, endDash);
         if (endMaybe) return endMaybe;
       }
-    } catch(_e){ if (DEBUG) try { console.warn('[resolveTbNowRef] resolve error', _e); } catch(_e2){} }
+    } catch(_e){
+      if (DEBUG) try { console.warn('[resolveTbNowRef] resolve error', _e); } catch(_e2){}
+    }
 
     if (FALLBACK_USE_MAX_TS_FROM_DATA && groups && groups.length) {
       var maxTs = null;
@@ -1079,68 +1264,92 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     return Date.now();
   }
 
-  // ---------- ALL DEVICES FETCH ----------
+  // ---------- API fetch ----------
+  async function fetchDeviceGroups(deviceId, startTs, endTs, urlKeys, token, parentSignal){
+    var url =
+      '/api/plugins/telemetry/DEVICE/' + deviceId + '/values/timeseries' +
+      '?keys=' + urlKeys +
+      '&startTs=' + startTs +
+      '&endTs=' + endTs +
+      '&limit=' + ALL_FETCH_LIMIT + '&agg=' + ALL_FETCH_AGG;
+
+    var timed = createTimedSignal(parentSignal, API_FETCH_TIMEOUT_MS);
+    try{
+      var res = await fetch(url, {
+        method:'GET',
+        signal: timed.signal,
+        headers:{
+          'Content-Type':'application/json',
+          'X-Authorization': token ? ('Bearer ' + token) : ''
+        }
+      });
+      if (!res.ok) return [];
+
+      var data = await res.json();
+      var groups = [];
+      for (var ki=0; ki<ALL_KEYS.length; ki++){
+        var k = ALL_KEYS[ki];
+        var arr = (data && data[k]) ? data[k] :
+                  (data && data[String(k).toLowerCase()]) ? data[String(k).toLowerCase()] :
+                  (data && data[String(k).toUpperCase()]) ? data[String(k).toUpperCase()] : [];
+        if (!arr || !arr.length) continue;
+
+        var g = {
+          id: 'ALL|' + deviceId + '|' + k,
+          label: deviceId + ' / ' + k,
+          dsName: deviceId,
+          keyName: k,
+          payloads: []
+        };
+        for (var i=0;i<arr.length;i++){
+          var p = arr[i];
+          if (!p) continue;
+          var ts = Number(p.ts);
+          var v = (p.value != null) ? p.value : p.v;
+          if (!isFiniteNumber(ts)) continue;
+          if (!(ts >= startTs && ts <= endTs)) continue;
+          g.payloads.push({ ts: ts, v: v });
+        }
+        if (g.payloads.length) groups.push(g);
+      }
+      return groups;
+    }catch(_e){
+      if (DEBUG && timed.isTimedOut()) {
+        try { console.warn('[histogram] telemetry timeout for device', deviceId); } catch(_){}
+      }
+      return [];
+    } finally {
+      timed.cleanup();
+    }
+  }
+
   async function fetchAllDevicesGroups(deviceIds, rng, signal){
     var seq = ++__fetchSeq;
     var token = safeGetToken();
     var startTs = Number(rng.start), endTs = Number(rng.end);
     var keys = ALL_KEYS.join(',');
     var urlKeys = encodeURIComponent(keys);
-
+    var queue = (deviceIds||[]).slice();
     var outGroups = [];
 
-    await Promise.all((deviceIds||[]).map(async function(deviceId){
-      var url =
-        `/api/plugins/telemetry/DEVICE/${deviceId}/values/timeseries` +
-        `?keys=${urlKeys}` +
-        `&startTs=${startTs}` +
-        `&endTs=${endTs}` +
-        `&limit=${ALL_FETCH_LIMIT}&agg=${ALL_FETCH_AGG}`;
+    var workerCount = Math.max(1, Math.min(ALL_FETCH_CONCURRENCY, queue.length || 1));
+    async function worker(){
+      while (queue.length) {
+        if (signal && signal.aborted) return;
+        var deviceId = queue.shift();
+        if (!deviceId) continue;
 
-      try{
-        var res = await fetch(url, {
-          method:'GET',
-          signal: signal,
-          headers:{
-            'Content-Type':'application/json',
-            ...(token ? {'X-Authorization':'Bearer '+token} : {})
-          }
-        });
-        if (!res.ok) return;
-
-        var data = await res.json();
-        // data[key] => [{ts,value}]
-        for (var ki=0; ki<ALL_KEYS.length; ki++){
-          var k = ALL_KEYS[ki];
-          var arr = (data && data[k]) ? data[k] :
-                    (data && data[String(k).toLowerCase()]) ? data[String(k).toLowerCase()] :
-                    (data && data[String(k).toUpperCase()]) ? data[String(k).toUpperCase()] : [];
-          if (!arr || !arr.length) continue;
-
-          var g = {
-            id: 'ALL|' + deviceId + '|' + k,
-            label: deviceId + ' / ' + k,
-            dsName: deviceId,
-            keyName: k,
-            payloads: []
-          };
-          for (var i=0;i<arr.length;i++){
-            var p = arr[i];
-            if (!p) continue;
-            var ts = Number(p.ts);
-            var v = (p.value != null) ? p.value : p.v;
-            if (!isFiniteNumber(ts)) continue;
-            if (!(ts >= startTs && ts <= endTs)) continue;
-            g.payloads.push({ ts: ts, v: v });
-          }
-          if (g.payloads.length) outGroups.push(g);
-        }
-      }catch(_e){
-        if (_e && _e.name === 'AbortError') return;
+        var groups = await fetchDeviceGroups(deviceId, startTs, endTs, urlKeys, token, signal);
+        if (signal && signal.aborted) return;
+        if (groups && groups.length) Array.prototype.push.apply(outGroups, groups);
       }
-    }));
+    }
 
-    if (seq !== __fetchSeq) return null; // superseded
+    var workers = [];
+    for (var wi=0; wi<workerCount; wi++) workers.push(worker());
+    await Promise.all(workers);
+
+    if (seq !== __fetchSeq) return null;
     return outGroups;
   }
 
@@ -1162,43 +1371,58 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     if (__pendingUpdate) clearTimeout(__pendingUpdate);
     __pendingUpdate = setTimeout(function(){
       __pendingUpdate = null;
-      var mySeq = ++__updateSeq;
-      var sig = buildSignature();
-      var now = Date.now();
+
+      var sig = buildRenderSignature();
+      var now = nowMs();
+
+      if (__isUpdating) {
+        if (ALLOW_RERUN_WHEN_BUSY) __needsRerun = true;
+        return;
+      }
+
       if (sig === __lastAppliedSig && (now - __lastAppliedAt) < SAME_SIG_SKIP_WINDOW_MS) {
         return;
       }
-      __lastAppliedSig = sig;
-      __lastAppliedAt = now;
-      runUpdate(mySeq);
+
+      var mySeq = ++__updateSeq;
+      runUpdate(mySeq, sig);
     }, delayMs || 0);
   }
 
-  async function runUpdate(mySeq) {
-    // Loading: luôn show trước, hide khi xong build + start anim
-    showLoading();
+  async function runUpdate(mySeq, renderSig) {
+    if (__isUpdating && __runningSig === renderSig) return;
 
-    refreshHeader();
-    ui.timeWindowText = getTimeWindowText(self.ctx);
-
-    var stParams = readStateParams();
-    var mode = getSelectedMode(stParams);
-
-    // Range tính từ timewindow (không cần groups)
-    var rng = currentRangeFromTB(self.ctx, null);
-
-    var groups = [];
+    __isUpdating = true;
+    __runningSig = renderSig;
+    __needsRerun = false;
+    startLoading(mySeq);
 
     try {
+      refreshHeader();
+      ui.timeWindowText = getTimeWindowText(self.ctx);
+
+      var stParams = readStateParams();
+      var mode = getSelectedMode(stParams);
+      var rng = currentRangeFromTB(self.ctx, null);
+
+      var groups = [];
+
       if (__activeAbort) { try { __activeAbort.abort(); } catch(_e){} }
       __activeAbort = new AbortController();
       var signal = __activeAbort.signal;
 
       if (ENABLE_ALL_DEVICES_MODE && mode === 'ALL') {
         var allIds = getAllDeviceIdsFromState(stParams);
+        if (allIds && allIds.length) __lastKnownAllIds = allIds.slice();
+        if ((!allIds || !allIds.length) && __lastKnownAllIds.length) {
+          allIds = __lastKnownAllIds.slice();
+        }
+
         if (!allIds || !allIds.length) {
           setEmptyState();
           drawAll();
+          __lastAppliedSig = renderSig;
+          __lastAppliedAt = nowMs();
           return;
         }
 
@@ -1207,12 +1431,12 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
         if (!fetched) {
           setEmptyState();
           drawAll();
+          __lastAppliedSig = renderSig;
+          __lastAppliedAt = nowMs();
           return;
         }
         groups = fetched;
-
       } else {
-        // SINGLE (prefer API to avoid stale subscription)
         if (SINGLE_FETCH_USES_API) {
           var singleId = getSingleDeviceIdFromStateOrCtx(stParams);
           if (singleId) {
@@ -1236,13 +1460,10 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
         });
       }
 
-      // fuse ages+gender (nếu có ages và gender cùng dsName)
       groups = fuseAgesAndGenderByTimestamp(groups);
 
-      // lọc theo rng (SINGLE vẫn có thể dùng rng)
-      // build histogram (giữ nguyên logic cũ)
       if (!GROUP_BY_DATASOURCE) {
-        var maleGlobal = [], femaleGlobal = [];
+        var maleGlobal = [], femaleGlobal = [], unknownGlobal = [];
         for (var gi = 0; gi < groups.length; gi++) {
           var g = groups[gi];
           for (var pi = 0; pi < g.payloads.length; pi++) {
@@ -1253,25 +1474,29 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
 
             var payload = rec.v != null ? rec.v : rec;
             var split = splitAgesByGender(payload);
-            if (split.male && split.male.length)   maleGlobal   = maleGlobal.concat(split.male);
+            if (split.male && split.male.length) maleGlobal = maleGlobal.concat(split.male);
             if (split.female && split.female.length) femaleGlobal = femaleGlobal.concat(split.female);
+            if (split.unknown && split.unknown.length) unknownGlobal = unknownGlobal.concat(split.unknown);
           }
         }
 
         var series = [];
-        if (SERIES === 'male' || SERIES === 'both')   series.push({ label: 'Male',   ages: maleGlobal });
+        if (SERIES === 'male' || SERIES === 'both') series.push({ label: 'Male', ages: maleGlobal });
         if (SERIES === 'female' || SERIES === 'both') series.push({ label: 'Female', ages: femaleGlobal });
+        if (SERIES === 'both' && unknownGlobal.length) series.push({ label: 'Unknown', ages: unknownGlobal });
 
         buildStackedHistogram(series);
         computeAutoZoom();
         startBarsAnimation();
-        _rAF(function(){ hideLoading(); });
+
+        __lastAppliedSig = renderSig;
+        __lastAppliedAt = nowMs();
         return;
       }
 
       var seriesOld = [];
       for (var gi2 = 0; gi2 < groups.length; gi2++) {
-        var g2 = groups[gi2], maleAll = [], femaleAll = [];
+        var g2 = groups[gi2], maleAll = [], femaleAll = [], unknownAll = [];
         for (var pi2 = 0; pi2 < g2.payloads.length; pi2++) {
           var rec2 = g2.payloads[pi2];
           var ts2 = Number(rec2 && rec2.ts);
@@ -1282,18 +1507,31 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
           var split2 = splitAgesByGender(payload2);
           maleAll = maleAll.concat(split2.male);
           femaleAll = femaleAll.concat(split2.female);
+          unknownAll = unknownAll.concat(split2.unknown || []);
         }
-        if (SERIES === 'male' || SERIES === 'both')   seriesOld.push({ label: g2.label + ' / male',   ages: maleAll });
+        if (SERIES === 'male' || SERIES === 'both') seriesOld.push({ label: g2.label + ' / male', ages: maleAll });
         if (SERIES === 'female' || SERIES === 'both') seriesOld.push({ label: g2.label + ' / female', ages: femaleAll });
+        if (SERIES === 'both' && unknownAll.length) seriesOld.push({ label: g2.label + ' / unknown', ages: unknownAll });
       }
 
       buildStackedHistogram(seriesOld);
       computeAutoZoom();
       startBarsAnimation();
-      _rAF(function(){ hideLoading(); });
+
+      __lastAppliedSig = renderSig;
+      __lastAppliedAt = nowMs();
+    } catch(_e) {
+      if (DEBUG) {
+        try { console.error('[histogram] runUpdate error', _e); } catch(_e2){}
+      }
     } finally {
-      if (mySeq === __updateSeq) {
-        _rAF(function(){ hideLoading(); });
+      __isUpdating = false;
+      __runningSig = null;
+      stopLoading(mySeq);
+
+      if (__needsRerun) {
+        __needsRerun = false;
+        scheduleUpdate(__rerunDelayMs);
       }
     }
   }
@@ -1315,7 +1553,7 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
     state.anim.raf = _rAF(tick);
   }
 
-  // ---------- Hover/Tooltip ----------
+  // ---------- Hover / Tooltip ----------
   function ensureContainerPositioned() {
     var c = getCanvasContainer();
     if (c && (!c.style.position || c.style.position === '')) c.style.position = 'relative';
@@ -1384,26 +1622,31 @@ var SINGLE_FETCH_USES_API = true;         // SINGLE cũng fetch trực tiếp đ
       if (ai < L.zStart || ai > L.zEnd) { hideTooltip(); return; }
 
       var Slen = state.seriesLabels.length;
+      var hidden = state.hiddenSeries || {};
       var totalAtAge = 0;
-      for (var si=0; si<Slen; si++) totalAtAge += (state.counts2D[si][ai] || 0);
+      for (var si=0; si<Slen; si++) {
+        if (hidden[si]) continue;
+        totalAtAge += (state.counts2D[si][ai] || 0);
+      }
 
       var baseline = 0, hoveredSi = -1;
       for (var si2=0; si2<Slen; si2++) {
+        if (hidden[si2]) continue;
         var c = (state.counts2D[si2][ai] || 0);
         if (!c) continue;
-        var hFull = (L.plotH * (c / Math.max(state.yMax,1)));
+        var hFull = (L.plotH * (c / Math.max(L.visibleYMax,1)));
         var hAnim = hFull * L.animProg;
         var topY = L.margin.top + (L.plotH - baseline - hAnim);
         var botY = L.margin.top + (L.plotH - baseline);
         if (my >= topY && my <= botY) { hoveredSi = si2; break; }
         baseline += hAnim;
       }
-      if (hoveredSi === -1) hoveredSi = 0;
 
       var ageVal = state.labels[ai];
       var lines = [];
       lines.push('<div style="font-weight:600;margin-bottom:4px">Age: ' + ageVal + '</div>');
       for (var j=0; j<Slen; j++) {
+        if (hidden[j]) continue;
         var v = state.counts2D[j][ai] || 0;
         var pct = formatPct(v, totalAtAge);
         var sw = '<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:' +
